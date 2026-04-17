@@ -1,0 +1,12 @@
+{
+  "images": {
+    "pet_standing": "assets/images/pet_standing.png",
+    "pet_crouching": "assets/images/pet_crouching.png",
+    "pet_sleeping": "assets/images/pet_sleeping.png",
+    "foods": {
+      "汉堡": "assets/images/foods/汉堡.png",
+      "炸鸡": "assets/images/foods/炸鸡.png",
+      "螺蛳粉": "assets/images/foods/螺蛳粉.png"
+    }
+  }
+}
