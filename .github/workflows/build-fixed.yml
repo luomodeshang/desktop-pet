@@ -1,0 +1,105 @@
+name: Build Windows EXE - Fixed
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 设置Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: 创建版本文件
+      run: |
+        $version = "${{ github.event.inputs.version || github.ref_name }}"
+        $version = $version -replace '^v', ''
+        echo "VERSION=$version" | Out-File -FilePath version.txt -Encoding UTF8
+        echo "版本号: $version"
+    
+    - name: 测试Python环境
+      run: |
+        python --version
+        pip list | findstr -i "pyqt5 pillow opencv numpy pyinstaller"
+    
+    - name: 简单打包测试
+      run: |
+        # 先测试一个简单的Python脚本能否打包
+        echo "print('Hello from Desktop Pet!')" > test_simple.py
+        python -m PyInstaller --onefile test_simple.py
+        
+        if (Test-Path "dist/test_simple.exe") {
+          echo "✅ 简单打包测试成功"
+          Get-Item "dist/test_simple.exe" | Format-List Name, Length
+        } else {
+          echo "❌ 简单打包测试失败"
+        }
+    
+    - name: 打包主程序（简化）
+      run: |
+        # 清理
+        if (Test-Path "build") { Remove-Item -Recurse -Force build }
+        if (Test-Path "dist") { Remove-Item -Recurse -Force dist }
+        
+        echo "开始打包主程序..."
+        
+        # 使用最简单的命令
+        python -m PyInstaller `
+          --name=DesktopPet `
+          --onefile `
+          --windowed `
+          --clean `
+          src/main.py
+        
+        if ($LASTEXITCODE -ne 0) {
+          echo "❌ PyInstaller打包失败"
+          exit 1
+        }
+        
+        # 检查结果
+        if (Test-Path "dist/DesktopPet.exe") {
+          $size = (Get-Item "dist/DesktopPet.exe").Length / 1MB
+          echo "✅ EXE文件生成成功"
+          echo "文件大小: $([math]::Round($size, 2)) MB"
+          echo "文件路径: dist/DesktopPet.exe"
+        } else {
+          echo "❌ EXE文件未生成"
+          exit 1
+        }
+    
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: desktop-pet-exe
+        path: dist/DesktopPet.exe
+        retention-days: 30
+    
+    - name: 创建GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/DesktopPet.exe
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+    
+    - name: 构建完成
+      run: |
+        echo "🎉 Windows EXE构建完成!"
+        echo "版本: $(Get-Content version.txt | Select-String 'VERSION=').ToString().Split('=')[1]"
+        echo "文件已上传到Release"
