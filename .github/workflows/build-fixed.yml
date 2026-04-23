@@ -1,105 +1,190 @@
-name: Build Windows EXE - Fixed
+name: Build Windows EXE (Fixed)
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
   workflow_dispatch:
 
 jobs:
-  build-windows:
+  build-windows-exe:
     runs-on: windows-latest
     
     steps:
-    - name: 检出代码
+    - name: Checkout repository
       uses: actions/checkout@v4
-    
-    - name: 设置Python 3.10
+      
+    - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
-    
-    - name: 安装依赖
+        
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pyinstaller
-    
-    - name: 创建版本文件
-      run: |
-        $version = "${{ github.event.inputs.version || github.ref_name }}"
-        $version = $version -replace '^v', ''
-        echo "VERSION=$version" | Out-File -FilePath version.txt -Encoding UTF8
-        echo "版本号: $version"
-    
-    - name: 测试Python环境
-      run: |
-        python --version
-        pip list | findstr -i "pyqt5 pillow opencv numpy pyinstaller"
-    
-    - name: 简单打包测试
-      run: |
-        # 先测试一个简单的Python脚本能否打包
-        echo "print('Hello from Desktop Pet!')" > test_simple.py
-        python -m PyInstaller --onefile test_simple.py
+        pip install pyinstaller==6.8.0
+        pip install pillow
         
-        if (Test-Path "dist/test_simple.exe") {
-          echo "✅ 简单打包测试成功"
-          Get-Item "dist/test_simple.exe" | Format-List Name, Length
-        } else {
-          echo "❌ 简单打包测试失败"
-        }
-    
-    - name: 打包主程序（简化）
+    - name: Verify icon file
       run: |
-        # 清理
-        if (Test-Path "build") { Remove-Item -Recurse -Force build }
-        if (Test-Path "dist") { Remove-Item -Recurse -Force dist }
+        if not exist "assets\images\icon.ico" (
+          echo "ICO icon not found, checking for PNG..."
+          if exist "assets\images\icon.png" (
+            echo "PNG found, converting to ICO..."
+            python -c "
+from PIL import Image
+img = Image.open('assets/images/icon.png')
+img.save('assets/images/icon.ico', format='ICO')
+print('ICO created successfully')
+"
+          ) else (
+            echo "No icon found, creating default..."
+            python -c "
+from PIL import Image
+img = Image.new('RGBA', (256, 256), (255, 255, 255, 0))
+img.save('assets/images/icon.ico', format='ICO')
+print('Default ICO created')
+"
+          )
+        )
         
-        echo "开始打包主程序..."
+    - name: Create PyInstaller spec file
+      run: |
+        # 创建简化的spec文件
+        $specContent = @"
+# -*- mode: python ; coding: utf-8 -*-
+
+block_cipher = None
+
+a = Analysis(
+    ['src/main.py'],
+    pathex=[],
+    binaries=[],
+    datas=[
+        ('assets', 'assets'),
+        ('config', 'config'),
+        ('requirements.txt', '.'),
+    ],
+    hiddenimports=[
+        'PyQt5',
+        'PyQt5.QtCore',
+        'PyQt5.QtGui',
+        'PyQt5.QtWidgets',
+        'PIL',
+        'PIL.Image',
+        'PIL.ImageQt',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name='DesktopPet',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon='assets/images/icon.ico',
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='DesktopPet',
+)
+"@
+        $specContent | Out-File -FilePath "desktop_pet.spec" -Encoding UTF8
         
-        # 使用最简单的命令
-        python -m PyInstaller `
-          --name=DesktopPet `
-          --onefile `
-          --windowed `
-          --clean `
-          src/main.py
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --clean --noconfirm desktop_pet.spec
         
-        if ($LASTEXITCODE -ne 0) {
-          echo "❌ PyInstaller打包失败"
+    - name: Verify EXE file
+      run: |
+        if exist "dist\DesktopPet\DesktopPet.exe" (
+          echo "EXE file created successfully"
+          dir "dist\DesktopPet\DesktopPet.exe"
+        ) else (
+          echo "EXE not found, checking dist folder..."
+          dir dist /s
           exit 1
-        }
+        )
         
-        # 检查结果
-        if (Test-Path "dist/DesktopPet.exe") {
-          $size = (Get-Item "dist/DesktopPet.exe").Length / 1MB
-          echo "✅ EXE文件生成成功"
-          echo "文件大小: $([math]::Round($size, 2)) MB"
-          echo "文件路径: dist/DesktopPet.exe"
-        } else {
-          echo "❌ EXE文件未生成"
-          exit 1
-        }
-    
-    - name: 上传构建产物
+    - name: Create portable ZIP
+      run: |
+        # 创建便携版ZIP
+        Compress-Archive -Path "dist\DesktopPet\*" -DestinationPath "DesktopPet_Windows_v${{ github.ref_name }}.zip" -Force
+        
+    - name: Create single EXE
+      run: |
+        # 创建单个EXE文件（可选）
+        pyinstaller --onefile --windowed --icon=assets/images/icon.ico --name=DesktopPet_Standalone src/main.py
+        if exist "dist\DesktopPet_Standalone.exe" (
+          echo "Single EXE created"
+        )
+        
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: desktop-pet-exe
-        path: dist/DesktopPet.exe
-        retention-days: 30
-    
-    - name: 创建GitHub Release
-      if: startsWith(github.ref, 'refs/tags/')
+        name: windows-desktop-pet
+        path: |
+          DesktopPet_Windows_v${{ github.ref_name }}.zip
+          dist/DesktopPet_Standalone.exe
+          
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: dist/DesktopPet.exe
-        generate_release_notes: true
-        draft: false
-        prerelease: false
-    
-    - name: 构建完成
-      run: |
-        echo "🎉 Windows EXE构建完成!"
-        echo "版本: $(Get-Content version.txt | Select-String 'VERSION=').ToString().Split('=')[1]"
-        echo "文件已上传到Release"
+        files: |
+          DesktopPet_Windows_v${{ github.ref_name }}.zip
+          dist/DesktopPet_Standalone.exe
+        body: |
+          # 桌面宠物程序 Windows 版
+          
+          ## 下载选项
+          1. **便携版ZIP**：解压即可使用，包含所有依赖
+          2. **单文件EXE**：单个可执行文件，方便分发
+          
+          ## 使用说明
+          1. 下载并解压ZIP文件（或直接运行EXE）
+          2. 首次运行需要选择一张照片
+          3. 左键点击宠物：触发动作
+          4. 右键点击宠物：投喂食物
+          5. 拖动宠物：移动位置
+          
+          ## 注意事项
+          - 杀毒软件可能误报，请点击"仍要运行"
+          - 需要Windows 10/11系统
+          - 程序完全免费开源
+          
+          ## 源代码
+          完整源代码：https://github.com/luomodeshang/desktop-pet
+          
+          ## 技术支持
+          问题反馈：https://github.com/luomodeshang/desktop-pet/issues
