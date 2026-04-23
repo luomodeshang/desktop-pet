@@ -1,6 +1,14 @@
 # 桌面宠物程序
 
-## 功能特性
+## 📥 下载
+**最新版本: v1.0.1**  
+
+- [源代码包](https://github.com/luomodeshang/desktop-pet/releases/download/v1.0.1/desktop-pet-v1.0.1-source.tar.gz) - 适合开发者
+- [Windows用户包](https://github.com/luomodeshang/desktop-pet/releases/download/v1.0.1/desktop-pet-v1.0.1-windows.tar.gz) - 需要Python环境
+
+查看所有版本: [Releases页面](https://github.com/luomodeshang/desktop-pet/releases)
+
+## 🎯 功能特性
 - 使用你的照片生成动漫风格宠物
 - 右键投喂（汉堡、炸鸡、螺蛳粉）
 - 左键点击触发动作（挥手、跳跃、踱步）
