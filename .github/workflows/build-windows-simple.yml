@@ -1,0 +1,90 @@
+name: Build Windows EXE (Simplified)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 设置Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        architecture: 'x64'
+    
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: 创建版本文件
+      run: |
+        $version = "${{ github.event.inputs.version || github.ref_name }}"
+        $version = $version -replace '^v', ''
+        echo "VERSION=$version" | Out-File -FilePath version.txt -Encoding UTF8
+        echo "版本号: $version"
+    
+    - name: 打包EXE（简化版）
+      run: |
+        # 清理旧的构建文件
+        if (Test-Path "build") { Remove-Item -Recurse -Force build }
+        if (Test-Path "dist") { Remove-Item -Recurse -Force dist }
+        
+        echo "开始打包EXE..."
+        
+        # 使用简化的PyInstaller命令
+        python -m PyInstaller `
+          --name="DesktopPet" `
+          --onefile `
+          --windowed `
+          --icon="assets/images/icon.ico" `
+          --add-data="config;config" `
+          --add-data="assets;assets" `
+          src/main.py
+        
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "PyInstaller打包失败"
+          exit 1
+        }
+        
+        # 验证EXE文件
+        if (Test-Path "dist/DesktopPet.exe") {
+          $fileSize = (Get-Item "dist/DesktopPet.exe").Length / 1MB
+          echo "✅ EXE文件生成成功，大小: $([math]::Round($fileSize, 2)) MB"
+        } else {
+          Write-Error "EXE文件未生成"
+          exit 1
+        }
+    
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-exe-${{ github.run_number }}
+        path: dist/DesktopPet.exe
+        retention-days: 30
+    
+    - name: 创建GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/DesktopPet.exe
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+    
+    - name: 构建完成通知
+      if: success()
+      run: |
+        $version = (Get-Content version.txt | Select-String "VERSION=").ToString().Split('=')[1]
+        echo "🎉 Windows EXE构建完成！"
+        echo "版本: $version"
+        echo "文件: dist/DesktopPet.exe"
