@@ -1,64 +1,24 @@
-# Python
+# Python缓存
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+*.pyc
+*.pyo
 *.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
 venv/
-env/
-.venv/
-ENV/
+*.egg/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# 构建文件
+build/
+dist/
+DesktopPet.spec
 
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+# 旧的压缩包
+*.tar.gz
+*.zip
 
-# Project specific
-*.log
-*.tmp
-*.temp
-*.bak
-*.backup
-*.sav
-
-# Images (except source images)
-assets/images/foods/
-assets/images/pet_*.png
-!assets/images/cartoon_pet.png
-
-# Config
+# 数据文件
+config/image_paths.json
 config/settings.json
-config/user_settings.json
 
-# Runtime
-*.db
-*.sqlite
-*.sqlite3
+# 操作系统
+.DS_Store
+Thumbs.db
