@@ -9,11 +9,13 @@ import os
 import json
 from datetime import datetime, timedelta
 from PyQt5.QtWidgets import (QApplication, QWidget, QMenu, QAction, 
-                             QSystemTrayIcon, QMessageBox)
+                             QSystemTrayIcon, QMessageBox, QFileDialog,
+                             QInputDialog, QLabel, QVBoxLayout, QPushButton,
+                             QDialog, QHBoxLayout)
 from PyQt5.QtCore import (Qt, QTimer, QPoint, QPropertyAnimation, 
-                         QEasingCurve, QRect, pyqtProperty)
+                         QEasingCurve, QRect, pyqtProperty, QSize)
 from PyQt5.QtGui import (QPainter, QPixmap, QColor, QPen, QBrush, 
-                        QFont, QMovie, QIcon)
+                        QFont, QMovie, QIcon, QImage)
 import numpy as np
 import cv2
 from PIL import Image
@@ -33,9 +35,16 @@ class DesktopPet(QWidget):
         self.current_state = "standing"  # standing, crouching, sleeping
         self.current_action = None
         self.food_list = ["汉堡", "炸鸡", "螺蛳粉"]
+        self.animation_frame = 0
+        self.action_animation = None
+        self.food_animation = None
         
         # 加载配置
         self.config = self.load_config()
+        
+        # 检查是否需要选择照片
+        if not self.config.get("user_photo_selected", False):
+            self.show_photo_selection_dialog()
         
         # 初始化UI
         self.init_ui()
@@ -74,11 +83,38 @@ class DesktopPet(QWidget):
         
     def load_pet_image(self):
         """加载宠物图像"""
-        # 临时使用占位图像
+        # 优先使用卡通化后的用户照片
+        cartoon_path = self.config.get("cartoon_path")
+        if cartoon_path and os.path.exists(cartoon_path):
+            try:
+                self.pet_image = QPixmap(cartoon_path)
+                if not self.pet_image.isNull():
+                    self.pet_image = self.pet_image.scaled(
+                        self.pet_size[0], self.pet_size[1],
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                    return
+            except:
+                pass
+        
+        # 使用默认头像
+        default_path = "assets/images/default_avatar.png"
+        if os.path.exists(default_path):
+            try:
+                self.pet_image = QPixmap(default_path)
+                if not self.pet_image.isNull():
+                    self.pet_image = self.pet_image.scaled(
+                        self.pet_size[0], self.pet_size[1],
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                    return
+            except:
+                pass
+        
+        # 绘制临时宠物（圆形）
         self.pet_image = QPixmap(self.pet_size[0], self.pet_size[1])
         self.pet_image.fill(Qt.transparent)
         
-        # 绘制临时宠物（圆形）
         painter = QPainter(self.pet_image)
         painter.setRenderHint(QPainter.Antialiasing)
         
@@ -101,8 +137,6 @@ class DesktopPet(QWidget):
         painter.drawArc(50, 80, 50, 30, 0, 180 * 16)
         
         painter.end()
-        
-        # TODO: 后续替换为卡通化后的用户照片
         
     def init_timers(self):
         """初始化定时器"""
@@ -131,6 +165,18 @@ class DesktopPet(QWidget):
             action.triggered.connect(lambda checked, f=food: self.feed_pet(f))
             feed_menu.addAction(action)
             
+        # 更换照片
+        change_photo_action = QAction("更换照片", self)
+        change_photo_action.triggered.connect(self.change_photo)
+        tray_menu.addAction(change_photo_action)
+        
+        # 查看食物历史
+        history_action = QAction("查看食物历史", self)
+        history_action.triggered.connect(self.show_food_history)
+        tray_menu.addAction(history_action)
+        
+        tray_menu.addSeparator()
+        
         # 退出动作
         exit_action = QAction("退出", self)
         exit_action.triggered.connect(self.quit_application)
@@ -139,6 +185,98 @@ class DesktopPet(QWidget):
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.show()
         
+    def quit_application(self):
+        """退出应用程序"""
+        self.save_config()
+        QApplication.quit()
+        
+    def change_photo(self):
+        """更换照片"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择新照片", "", 
+            "图片文件 (*.jpg *.jpeg *.png *.bmp *.gif)"
+        )
+        
+        if file_path:
+            cartoon_path = "assets/images/user_pet.png"
+            if cartoonize_photo(file_path, cartoon_path):
+                self.config["user_photo"] = file_path
+                self.config["cartoon_path"] = cartoon_path
+                self.config["use_default_avatar"] = False
+                self.save_config()
+                
+                # 重新加载宠物图像
+                self.load_pet_image()
+                self.update()
+                QMessageBox.information(self, "成功", "照片更换成功！")
+            else:
+                QMessageBox.warning(self, "错误", "照片处理失败")
+    
+    def show_food_history(self):
+        """显示食物历史"""
+        history = self.config.get("food_history", [])
+        if not history:
+            QMessageBox.information(self, "食物历史", "还没有投喂记录")
+            return
+        
+        history_text = "食物投喂记录:\n\n"
+        for item in history[-10:]:  # 显示最近10条
+            history_text += f"{item['time']} - {item['food']}\n"
+        
+        QMessageBox.information(self, "食物历史", history_text)
+        self.start_feed_animation(food)
+        
+        # 记录食物历史
+        if "food_history" not in self.config:
+            self.config["food_history"] = []
+        self.config["food_history"].append({
+            "food": food,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+        self.save_config()
+    
+    def start_feed_animation(self, food):
+        """开始投喂动画"""
+        self.food_animation = food
+        self.food_frame = 0
+        
+        # 加载食物图像
+        food_images = {
+            "汉堡": "assets/images/hamburger.png",
+            "炸鸡": "assets/images/fried_chicken.png",
+            "螺蛳粉": "assets/images/luosifen.png"
+        }
+        
+        food_path = food_images.get(food)
+        if food_path and os.path.exists(food_path):
+            self.food_image = QPixmap(food_path)
+            self.food_image = self.food_image.scaled(50, 50, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        else:
+            # 创建默认食物图像
+            self.food_image = QPixmap(50, 50)
+            self.food_image.fill(Qt.transparent)
+            painter = QPainter(self.food_image)
+            painter.setBrush(QBrush(QColor(255, 200, 100)))
+            painter.drawEllipse(5, 5, 40, 40)
+            painter.end()
+        
+        # 开始动画定时器
+        self.feed_timer = QTimer()
+        self.feed_timer.timeout.connect(self.update_feed_frame)
+        self.feed_timer.start(50)  # 20fps
+    
+    def update_feed_frame(self):
+        """更新投喂帧"""
+        self.food_frame += 1
+        if self.food_frame > 40:  # 2秒动画
+            self.feed_timer.stop()
+            self.food_animation = None
+            self.update()
+            return
+        
+        # 在绘制事件中显示食物动画
+        self.update()
+    
     def paintEvent(self, event):
         """绘制事件"""
         painter = QPainter(self)
@@ -146,6 +284,20 @@ class DesktopPet(QWidget):
         
         # 绘制宠物图像
         painter.drawPixmap(0, 0, self.pet_image)
+        
+        # 绘制投喂动画
+        if self.food_animation and hasattr(self, 'food_image'):
+            # 食物从上方落下的动画
+            food_y = -50 + self.food_frame * 3  # 从上方落下
+            if food_y < 100:  # 在宠物上方
+                food_x = 50  # 居中
+                painter.drawPixmap(food_x, food_y, self.food_image)
+            
+            # 绘制食物名称
+            if self.food_frame > 20:  # 后半段显示文字
+                painter.setFont(QFont("Arial", 10))
+                painter.setPen(QColor(255, 100, 100))
+                painter.drawText(60, 120, self.food_animation)
         
         # 根据状态添加效果
         if self.current_state == "sleeping":
@@ -192,7 +344,110 @@ class DesktopPet(QWidget):
         # 重置状态为站立
         self.current_state = "standing"
         
-        # TODO: 实现具体动作动画
+        # 开始动作动画
+        self.start_action_animation(self.current_action)
+        
+        print(f"触发动作: {self.current_action}")
+    
+    def start_action_animation(self, action):
+        """开始动作动画"""
+        self.action_animation = action
+        self.animation_frame = 0
+        
+        # 根据动作设置动画参数
+        if action == "wave":
+            self.wave_animation()
+        elif action == "jump":
+            self.jump_animation()
+        elif action == "walk":
+            self.walk_animation()
+    
+    def wave_animation(self):
+        """挥手动画"""
+        # 保存原始图像
+        self.original_image = self.pet_image.copy()
+        
+        # 创建动画定时器
+        self.wave_timer = QTimer()
+        self.wave_timer.timeout.connect(self.update_wave_frame)
+        self.wave_timer.start(100)  # 10fps
+        self.wave_frame = 0
+    
+    def update_wave_frame(self):
+        """更新挥手帧"""
+        self.wave_frame += 1
+        if self.wave_frame > 10:  # 1秒动画
+            self.wave_timer.stop()
+            self.pet_image = self.original_image
+            self.action_animation = None
+            self.update()
+            return
+        
+        # 创建挥手效果的图像
+        temp_image = self.original_image.copy()
+        painter = QPainter(temp_image)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 根据帧数绘制挥手效果
+        wave_height = 10 * abs(5 - self.wave_frame) / 5  # 中间最高
+        
+        # 绘制挥手线
+        painter.setPen(QPen(QColor(255, 100, 100), 3))
+        painter.drawLine(120, 60, 140, 60 - wave_height)
+        
+        painter.end()
+        self.pet_image = temp_image
+        self.update()
+    
+    def jump_animation(self):
+        """跳跃动画"""
+        self.jump_timer = QTimer()
+        self.jump_timer.timeout.connect(self.update_jump_frame)
+        self.jump_timer.start(50)  # 20fps
+        self.jump_frame = 0
+        self.original_pos = self.pos()
+    
+    def update_jump_frame(self):
+        """更新跳跃帧"""
+        self.jump_frame += 1
+        if self.jump_frame > 20:  # 1秒动画
+            self.jump_timer.stop()
+            self.move(self.original_pos)
+            self.action_animation = None
+            return
+        
+        # 跳跃轨迹：正弦波
+        height = 30 * abs(10 - self.jump_frame) / 10  # 中间最高
+        new_pos = QPoint(self.original_pos.x(), self.original_pos.y() - int(height))
+        self.move(new_pos)
+    
+    def walk_animation(self):
+        """踱步动画"""
+        self.walk_timer = QTimer()
+        self.walk_timer.timeout.connect(self.update_walk_frame)
+        self.walk_timer.start(200)  # 5fps
+        self.walk_frame = 0
+        self.walk_direction = 1  # 1向右，-1向左
+    
+    def update_walk_frame(self):
+        """更新踱步帧"""
+        self.walk_frame += 1
+        if self.walk_frame > 10:  # 2秒动画
+            self.walk_timer.stop()
+            self.action_animation = None
+            return
+        
+        # 左右移动
+        move_distance = 5 * self.walk_direction
+        new_pos = QPoint(self.x() + move_distance, self.y())
+        
+        # 检查边界
+        screen_geometry = QApplication.desktop().availableGeometry()
+        if new_pos.x() < 0 or new_pos.x() > screen_geometry.width() - self.width():
+            self.walk_direction *= -1  # 反向
+            new_pos = QPoint(self.x() - move_distance, self.y())
+        
+        self.move(new_pos)
         
     def show_feed_menu(self, position):
         """显示投喂菜单"""
@@ -234,13 +489,22 @@ class DesktopPet(QWidget):
             "pet_size": [150, 150],
             "position": [100, 100],
             "last_state": "standing",
-            "food_history": []
+            "food_history": [],
+            "user_photo_selected": False,
+            "use_default_avatar": False,
+            "user_photo": None,
+            "cartoon_path": None
         }
         
         if os.path.exists(config_path):
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    loaded_config = json.load(f)
+                    # 合并配置，确保新字段存在
+                    for key in default_config:
+                        if key not in loaded_config:
+                            loaded_config[key] = default_config[key]
+                    return loaded_config
             except:
                 return default_config
         return default_config
@@ -251,17 +515,94 @@ class DesktopPet(QWidget):
             "pet_size": [self.width(), self.height()],
             "position": [self.x(), self.y()],
             "last_state": self.current_state,
-            "food_history": []  # TODO: 添加食物历史
+            "food_history": [],  # TODO: 添加食物历史
+            "user_photo_selected": self.config.get("user_photo_selected", False),
+            "use_default_avatar": self.config.get("use_default_avatar", False),
+            "user_photo": self.config.get("user_photo"),
+            "cartoon_path": self.config.get("cartoon_path")
         }
         
         os.makedirs("config", exist_ok=True)
         with open("config/pet_config.json", 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
             
-    def quit_application(self):
-        """退出应用程序"""
+    def show_photo_selection_dialog(self):
+        """显示照片选择对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("选择照片创建宠物")
+        dialog.setFixedSize(400, 300)
+        
+        layout = QVBoxLayout()
+        
+        # 标题
+        title_label = QLabel("欢迎使用桌面宠物！")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # 说明
+        desc_label = QLabel("请选择一张照片，系统将为您生成动漫风格的宠物")
+        desc_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(desc_label)
+        
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        
+        # 选择照片按钮
+        select_btn = QPushButton("选择照片")
+        select_btn.clicked.connect(lambda: self.select_photo(dialog))
+        button_layout.addWidget(select_btn)
+        
+        # 使用默认头像按钮
+        default_btn = QPushButton("使用默认头像")
+        default_btn.clicked.connect(lambda: self.use_default_avatar(dialog))
+        button_layout.addWidget(default_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # 跳过按钮
+        skip_btn = QPushButton("稍后选择")
+        skip_btn.clicked.connect(dialog.accept)
+        layout.addWidget(skip_btn)
+        
+        dialog.setLayout(layout)
+        dialog.exec_()
+    
+    def select_photo(self, dialog):
+        """选择照片"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择照片", "", 
+            "图片文件 (*.jpg *.jpeg *.png *.bmp *.gif)"
+        )
+        
+        if file_path:
+            # 保存照片路径
+            self.photo_path = file_path
+            self.config["user_photo"] = file_path
+            self.config["user_photo_selected"] = True
+            
+            # 卡通化处理
+            cartoon_path = "assets/images/user_pet.png"
+            if cartoonize_photo(file_path, cartoon_path):
+                self.config["cartoon_path"] = cartoon_path
+                QMessageBox.information(self, "成功", "宠物创建成功！")
+            else:
+                QMessageBox.warning(self, "警告", "照片处理失败，使用默认头像")
+                self.use_default_avatar(dialog, show_message=False)
+            
+            self.save_config()
+            dialog.accept()
+    
+    def use_default_avatar(self, dialog, show_message=True):
+        """使用默认头像"""
+        self.config["user_photo_selected"] = True
+        self.config["use_default_avatar"] = True
         self.save_config()
-        QApplication.quit()
+        
+        if show_message:
+            QMessageBox.information(self, "提示", "已使用默认头像，您可以在设置中更改")
+        
+        dialog.accept()
         
     def closeEvent(self, event):
         """关闭事件"""
