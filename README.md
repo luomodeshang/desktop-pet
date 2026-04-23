@@ -10,13 +10,16 @@
 ### 🪟 对于Windows小白用户（最简单！）
 **你没有任何技术基础？没问题！**
 
-**推荐方案**：
-1. 下载 [Windows_一键获取器.bat](Windows_一键获取器.bat)
+**推荐方案**（纯英文，解决编码问题）：
+1. 下载 [DesktopPet_Simple_Installer.bat](DesktopPet_Simple_Installer.bat) - 纯英文安装器
 2. 双击运行
 3. 按照提示操作
 4. 完成！桌面会出现"桌面宠物"图标
 
 **其他选项**（任选其一）：
+- [Download_DesktopPet.bat](Download_DesktopPet.bat) - 只下载EXE文件（最简单）
+- [DesktopPet_EXE_Downloader.bat](DesktopPet_EXE_Downloader.bat) - 下载EXE和资源文件
+- [Windows_一键获取器.bat](Windows_一键获取器.bat) - 中文版安装器
 - [Windows_小白专用安装器.bat](Windows_小白专用安装器.bat) - 专为小白设计
 - [Windows_完整安装助手.bat](Windows_完整安装助手.bat) - 完整功能安装
 - [Windows_用户助手.bat](Windows_用户助手.bat) - 智能环境检测
@@ -62,18 +65,18 @@
 
 ## 🚀 快速开始（小白用户版）
 
-### 第一步：获取程序
-1. 点击 [Windows_一键获取器.bat](Windows_一键获取器.bat) 下载
+### 第一步：获取程序（推荐纯英文版）
+1. 点击 [DesktopPet_Simple_Installer.bat](DesktopPet_Simple_Installer.bat) 下载（纯英文，无编码问题）
 2. 如果浏览器阻止下载，选择"保留"或"允许"
 
 ### 第二步：运行安装
-1. 找到下载的 `Windows_一键获取器.bat` 文件
+1. 找到下载的 `DesktopPet_Simple_Installer.bat` 文件
 2. 双击运行
 3. 如果出现安全警告，点击"更多信息" → "仍要运行"
-4. 按照屏幕提示操作
+4. 按照屏幕提示操作（全部英文界面）
 
 ### 第三步：使用程序
-1. 安装完成后，桌面上会出现"桌面宠物"图标
+1. 安装完成后，桌面上会出现"DesktopPet"图标
 2. 双击图标启动程序
 3. 首次运行选择一张照片
 4. 开始享受你的桌面宠物！
@@ -115,21 +118,7 @@
 ```
 
 ## 🔧 文件结构
-```
-桌面宠物程序/
-├── Windows_一键获取器.bat        # 最简单的获取方式（推荐！）
-├── Windows_小白专用安装器.bat     # 小白用户专用
-├── Windows_完整安装助手.bat       # 完整功能安装
-├── Windows_用户助手.bat          # 智能环境检测
-├── Windows_一键安装助手.bat      # 快速安装
-├── Windows_环境检查工具.bat      # 环境检查
-├── src/                         # 程序源代码
-├── assets/                      # 资源文件
-│   └── images/                  # 图片和图标
-├── config/                      # 配置文件
-├── run.bat                      # 启动脚本
-└── 各种用户指南.md               # 使用说明文档
-```
+```\n桌面宠物程序/\n├── Download_DesktopPet.bat           # 只下载EXE（最简单）\n├── DesktopPet_Simple_Installer.bat   # 纯英文安装器（推荐）\n├── DesktopPet_EXE_Downloader.bat     # 下载EXE和资源\n├── Windows_一键获取器.bat            # 最简单的获取方式\n├── Windows_小白专用安装器.bat         # 小白用户专用\n├── Windows_完整安装助手.bat           # 完整功能安装\n├── Windows_用户助手.bat              # 智能环境检测\n├── Windows_一键安装助手.bat          # 快速安装\n├── Windows_环境检查工具.bat          # 环境检查\n├── src/                             # 程序源代码\n├── assets/                          # 资源文件\n│   └── images/                      # 图片和图标\n├── config/                          # 配置文件\n├── run.bat                          # 启动脚本\n└── 各种用户指南.md                   # 使用说明文档\n```
 
 ## 📞 获取帮助
 
