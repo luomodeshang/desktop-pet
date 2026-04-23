@@ -1,10 +1,15 @@
 # 桌面宠物程序
 
 ## 📥 下载
-**最新版本: v1.0.1**  
+**最新版本: v1.0.2**  
 
-- [源代码包](https://github.com/luomodeshang/desktop-pet/releases/download/v1.0.1/desktop-pet-v1.0.1-source.tar.gz) - 适合开发者
-- [Windows用户包](https://github.com/luomodeshang/desktop-pet/releases/download/v1.0.1/desktop-pet-v1.0.1-windows.tar.gz) - 需要Python环境
+### 🪟 Windows用户（推荐）
+- [DesktopPet.exe](https://github.com/luomodeshang/desktop-pet/releases/download/v1.0.2/DesktopPet.exe) - 单个可执行文件，双击即可运行
+- [DesktopPet_Windows_v1.0.2.zip](https://github.com/luomodeshang/desktop-pet/releases/download/v1.0.2/DesktopPet_Windows_v1.0.2.zip) - 绿色免安装版
+- [DesktopPet_Setup.exe](https://github.com/luomodeshang/desktop-pet/releases/download/v1.0.2/DesktopPet_Setup.exe) - 安装程序版
+
+### 💻 开发者/高级用户
+- [源代码包](https://github.com/luomodeshang/desktop-pet/releases/download/v1.0.2/desktop-pet-v1.0.2-source.tar.gz) - 完整源代码，需要Python环境
 
 查看所有版本: [Releases页面](https://github.com/luomodeshang/desktop-pet/releases)
 
