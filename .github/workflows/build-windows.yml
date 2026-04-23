@@ -1,0 +1,227 @@
+name: Build Windows EXE
+
+on:
+  push:
+    tags:
+      - 'v*'  # 推送标签时触发，如 v1.0.0
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      version:
+        description: '版本号 (如: 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: 设置Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        architecture: 'x64'
+    
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: 创建版本文件
+      run: |
+        $version = "${{ github.event.inputs.version || github.ref_name }}"
+        $version = $version -replace '^v', ''
+        echo "VERSION=$version" | Out-File -FilePath version.txt -Encoding UTF8
+        echo "版本号: $version"
+    
+    - name: 打包EXE
+      run: |
+        # 清理旧的构建文件
+        if (Test-Path "build") { Remove-Item -Recurse -Force build }
+        if (Test-Path "dist") { Remove-Item -Recurse -Force dist }
+        
+        # 运行PyInstaller
+        python -m PyInstaller --clean --noconfirm `
+          --name="DesktopPet" `
+          --onefile `
+          --windowed `
+          --icon="assets\images\icon.ico" `
+          --add-data="config;config" `
+          --add-data="assets;assets" `
+          --hidden-import="PyQt5" `
+          --hidden-import="PIL" `
+          --hidden-import="cv2" `
+          --hidden-import="numpy" `
+          src\main.py
+        
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "PyInstaller打包失败"
+          exit 1
+        }
+        
+        # 验证EXE文件
+        if (Test-Path "dist\DesktopPet.exe") {
+          $fileSize = (Get-Item "dist\DesktopPet.exe").Length / 1MB
+          echo "✅ EXE文件生成成功，大小: $([math]::Round($fileSize, 2)) MB"
+        } else {
+          Write-Error "EXE文件未生成"
+          exit 1
+        }
+    
+    - name: 创建绿色版ZIP
+      run: |
+        # 创建临时目录
+        New-Item -ItemType Directory -Force -Path "dist\temp_package\DesktopPet"
+        
+        # 复制文件
+        Copy-Item "dist\DesktopPet.exe" -Destination "dist\temp_package\DesktopPet\DesktopPet.exe"
+        Copy-Item "config" -Destination "dist\temp_package\DesktopPet\" -Recurse
+        Copy-Item "assets" -Destination "dist\temp_package\DesktopPet\" -Recurse
+        
+        # 创建说明文件
+        @"
+桌面宠物程序 - 绿色免安装版
+==============================
+
+使用方法：
+1. 解压此ZIP包到任意目录
+2. 双击运行 DesktopPet.exe
+3. 首次运行选择一张照片
+4. 开始与桌面宠物互动！
+
+功能说明：
+- 左键点击：触发动作（挥手、跳跃、踱步）
+- 右键点击：投喂食物（汉堡、炸鸡、螺蛳粉）
+- 拖动宠物：移动位置
+- 长时间不动：自动切换状态（站立→蹲下→睡觉）
+
+项目地址：https://github.com/luomodeshang/desktop-pet
+版本: $((Get-Content version.txt | Select-String "VERSION=").ToString().Split('=')[1])
+"@ | Out-File -FilePath "dist\temp_package\DesktopPet\README.txt" -Encoding UTF8
+        
+        # 创建ZIP包
+        $version = (Get-Content version.txt | Select-String "VERSION=").ToString().Split('=')[1]
+        $zipName = "DesktopPet_Windows_v$version.zip"
+        Compress-Archive -Path "dist\temp_package\DesktopPet\*" -DestinationPath "dist\$zipName" -Force
+        
+        # 清理临时文件
+        Remove-Item -Recurse -Force "dist\temp_package"
+        
+        echo "✅ 绿色版创建成功: dist\$zipName"
+    
+    - name: 创建安装程序（需要Inno Setup）
+      run: |
+        # 下载Inno Setup（如果未安装）
+        if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+          echo "正在下载Inno Setup..."
+          $url = "https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe"
+          $installer = "$env:TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          
+          # 静默安装Inno Setup
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+          Start-Sleep -Seconds 10
+        }
+        
+        # 创建安装脚本
+        $version = (Get-Content version.txt | Select-String "VERSION=").ToString().Split('=')[1]
+        $issContent = @"
+; 桌面宠物程序安装脚本
+#define MyAppName "桌面宠物程序"
+#define MyAppVersion "$version"
+#define MyAppPublisher "luomodeshang"
+#define MyAppURL "https://github.com/luomodeshang/desktop-pet"
+#define MyAppExeName "DesktopPet.exe"
+
+[Setup]
+AppId={{D3C8A4B1-9E2F-4A7C-B8D3-123456789ABC}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+DefaultDirName={autopf}\{#MyAppName}
+DefaultGroupName={#MyAppName}
+OutputDir=dist
+OutputBaseFilename=DesktopPet_Setup
+Compression=lzma
+SolidCompression=yes
+WizardStyle=modern
+
+[Languages]
+Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+Source: "dist\DesktopPet.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "config\*"; DestDir: "{app}\config"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "USER_GUIDE_小白版.md"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+"@
+        
+        $issContent | Out-File -FilePath "packaging\auto_generated.iss" -Encoding UTF8
+        
+        # 编译安装程序
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "packaging\auto_generated.iss"
+        
+        if (Test-Path "dist\DesktopPet_Setup.exe") {
+          $setupSize = (Get-Item "dist\DesktopPet_Setup.exe").Length / 1MB
+          echo "✅ 安装程序创建成功，大小: $([math]::Round($setupSize, 2)) MB"
+        } else {
+          echo "⚠️ 安装程序创建失败，但EXE和ZIP已生成"
+        }
+    
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-build-${{ github.run_number }}
+        path: |
+          dist/DesktopPet.exe
+          dist/DesktopPet_Windows_*.zip
+          dist/DesktopPet_Setup.exe
+        retention-days: 30
+    
+    - name: 创建GitHub Release（仅标签推送）
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/DesktopPet.exe
+          dist/DesktopPet_Windows_*.zip
+          dist/DesktopPet_Setup.exe
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+    
+    - name: 清理工作空间
+      if: always()
+      run: |
+        # 保留dist目录，清理其他临时文件
+        if (Test-Path "build") { Remove-Item -Recurse -Force build }
+        if (Test-Path "__pycache__") { Remove-Item -Recurse -Force __pycache__ }
+        if (Test-Path "*.spec") { Remove-Item -Force *.spec }
+        if (Test-Path "packaging\auto_generated.iss") { Remove-Item -Force "packaging\auto_generated.iss" }
+    
+    - name: 构建完成通知
+      if: success()
+      run: |
+        $version = (Get-Content version.txt | Select-String "VERSION=").ToString().Split('=')[1]
+        echo "🎉 Windows版构建完成！"
+        echo "版本: $version"
+        echo "生成文件:"
+        Get-ChildItem dist\* | ForEach-Object { echo "  - $($_.Name) ($([math]::Round($_.Length/1MB, 2)) MB)" }
