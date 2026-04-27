@@ -58,10 +58,18 @@ echo ========================================
 echo Starting Desktop Pet...
 echo.
 echo Controls:
-echo - Left-click: Trigger action
-echo - Right-click: Feed food
+echo - Left-click: Random action (wave/jump/walk)
+echo - Double-click: Spin jump!
+echo - Right-click: Feed food (burger/fries/snail noodles)
 echo - Drag: Move pet
-echo - Tray menu: More options
+echo - Tray menu: Size/Photo/History/Exit
+echo.
+echo Features:
+echo - Photo to Q-Avatar (chibi style)
+echo - Auto clothes color matching
+echo - Live2D style animation (breath/blink/hair wave)
+echo - Mood-driven expressions (happy/surprised/eating)
+echo - Idle states (stand/crouch/sleep)
 echo ========================================
 echo.
 
