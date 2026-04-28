@@ -8,6 +8,12 @@ from datetime import datetime
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, QTimer, QPoint
 from PyQt5.QtGui import *
+
+# Fix import for "python src/main.py" (Windows cmd)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 from src.qavatar_generator import extract_face_features, QAvatarRenderer, Live2DAnimator
 from src.animation_engine import AnimationEngine, AnimationType, FrameGenerator
 
