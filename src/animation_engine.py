@@ -4,7 +4,6 @@
 替代原来独立的 wave/jump/walk/feed QTimer，所有动画在单个主循环中调度
 """
 
-import math
 import numpy as np
 from enum import Enum, auto
 from PyQt5.QtCore import QTimer, QPoint, Qt
@@ -82,36 +81,19 @@ class FrameGenerator:
     def prerender_wave(self):
         frames = []
         w, h = self.pet_size
-        # Smooth wave: slow up, fast down with slight body sway
-        total = 16
-        for i in range(total):
+        arm_angles = [0, 10, 20, 30, 40, 50, 60, 50, 40, 30, 20, 10, 0]
+        for angle in arm_angles:
             pix = self._copy_base()
             if pix:
                 painter = QPainter(pix)
                 painter.setRenderHint(QPainter.Antialiasing)
-                # Ease-in-out angle curve
-                t = i / total
-                angle = 50 * (np.sin(t * np.pi * 0.8))  # peak 50 degrees
-                rad = angle * math.pi / 180
-                # Shoulder pivot point (right side)
-                px = int(w * 0.72)
-                py = int(h * 0.35)
-                # Hand position
-                arm_len = int(min(w, h) * 0.28)
-                hx = px + int(arm_len * np.sin(rad))
-                hy = py - int(arm_len * np.cos(rad))
-                # Upper arm (thick, soft line)
-                painter.setPen(QPen(QColor(100, 160, 255), 6, Qt.SolidLine, Qt.RoundCap))
-                painter.drawLine(px, py, hx, hy)
-                # Hand (rounded)
-                painter.setBrush(QBrush(QColor(255, 210, 160)))
-                painter.setPen(Qt.NoPen)
-                painter.drawEllipse(hx - 6, hy - 6, 14, 14)
-                # Slight body sway
-                sway = int(4 * np.sin(t * np.pi * 2))
-                if abs(sway) > 1:
-                    painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
-                    painter.drawLine(px - sway, h - 10, px + int(w * 0.1), h - 10)
+                rad = angle * 3.14159 / 180
+                hand_x = w - 30 + int(25 * np.cos(rad))
+                hand_y = 40 - int(25 * np.sin(rad))
+                painter.setPen(QPen(QColor(100, 150, 255), 4))
+                painter.drawLine(w - 40, 60, hand_x, hand_y)
+                painter.setBrush(QBrush(QColor(255, 200, 150)))
+                painter.drawEllipse(hand_x - 5, hand_y - 5, 12, 12)
                 painter.end()
             frames.append(pix)
         self._cache[AnimationType.WAVE] = frames
@@ -119,59 +101,62 @@ class FrameGenerator:
     def prerender_feed(self):
         frames = []
         w, h = self.pet_size
-        food_name = getattr(self, '_feed_food_type', 'burger')
+        food_name = getattr(self, '_feed_food_type', '').lower()
         for i in range(51):
             pix = self._copy_base()
             if pix:
                 painter = QPainter(pix)
                 painter.setRenderHint(QPainter.Antialiasing)
                 progress = i / 50
-                # Hand movement: arm reaches out
-                hand_angle = int(40 * (1.0 - abs(progress - 0.3) * 3)) if progress < 0.6 else 0
-                if hand_angle > 0:
-                    hand_x = w // 2 + int(35 * math.cos(hand_angle * math.pi / 180))
-                    hand_y = int(60 + 30 * math.sin(hand_angle * math.pi / 180))
-                    painter.setPen(QPen(QColor(100, 150, 255), 5))
-                    painter.drawLine(w // 2 + 10, 70, hand_x, hand_y)
-                    painter.setBrush(QBrush(QColor(255, 200, 150)))
-                    painter.setPen(Qt.NoPen)
-                    painter.drawEllipse(hand_x - 4, hand_y - 4, 10, 10)
-                # Food with different shapes per type
                 food_y = -40 + min(i * 2, 60)
                 if food_y < 80 and progress < 0.5:
-                    food_x = w // 2 + 10 + int(15 * math.sin(progress * 10))
-                    if 'burger' in str(food_name).lower():
-                        # Burger: two buns + patty
+                    food_x = w // 2 - 20
+                    if 'burger' in food_name or 'fried' in food_name or 'chicken' in food_name:
+                        # Burger style
                         painter.setBrush(QBrush(QColor(220, 160, 80)))
                         painter.setPen(Qt.NoPen)
-                        painter.drawEllipse(food_x - 15, int(food_y), 30, 10)
+                        painter.drawEllipse(food_x, int(food_y), 40, 12)
                         painter.setBrush(QBrush(QColor(140, 80, 30)))
-                        painter.drawRect(food_x - 12, int(food_y + 8), 24, 8)
+                        painter.drawRect(food_x + 3, int(food_y + 10), 34, 10)
                         painter.setBrush(QBrush(QColor(220, 160, 80)))
-                        painter.drawEllipse(food_x - 15, int(food_y + 14), 30, 10)
-                    elif 'chicken' in str(food_name).lower() or 'fried' in str(food_name).lower():
-                        # Drumstick: oval + bone
-                        painter.setBrush(QBrush(QColor(200, 120, 50)))
+                        painter.drawEllipse(food_x, int(food_y + 18), 40, 12)
+                        # Burger detail
+                        painter.setPen(QPen(QColor(100, 200, 80), 2))
+                        painter.drawLine(food_x + 10, int(food_y + 15), food_x + 30, int(food_y + 15))
+                    elif 'fried' in food_name and 'chicken' in food_name:
+                        # Drumstick
+                        painter.setBrush(QBrush(QColor(200, 130, 50)))
                         painter.setPen(Qt.NoPen)
-                        painter.drawEllipse(food_x - 10, int(food_y + 2), 22, 16)
+                        painter.drawEllipse(food_x + 4, int(food_y + 2), 32, 18)
                         painter.setBrush(QBrush(QColor(220, 160, 100)))
-                        painter.drawRoundedRect(food_x - 4, int(food_y), 10, 18, 3, 3)
+                        painter.drawRoundedRect(food_x + 8, int(food_y), 16, 22, 4, 4)
                         painter.setPen(QPen(QColor(180, 140, 100), 2))
-                        painter.drawLine(food_x + 10, int(food_y + 8), food_x + 16, int(food_y + 12))
+                        painter.drawLine(food_x + 30, int(food_y + 10), food_x + 38, int(food_y + 14))
+                    elif 'chicken' in food_name:
+                        # Drumstick (same as fried chicken)
+                        painter.setBrush(QBrush(QColor(200, 130, 50)))
+                        painter.setPen(Qt.NoPen)
+                        painter.drawEllipse(food_x + 4, int(food_y + 2), 32, 18)
+                        painter.setBrush(QBrush(QColor(220, 160, 100)))
+                        painter.drawRoundedRect(food_x + 8, int(food_y), 16, 22, 4, 4)
+                        painter.setPen(QPen(QColor(180, 140, 100), 2))
+                        painter.drawLine(food_x + 30, int(food_y + 10), food_x + 38, int(food_y + 14))
                     else:
-                        # Snail noodles: bowl shape
+                        # Noodles bowl
                         painter.setBrush(QBrush(QColor(180, 140, 100)))
                         painter.setPen(Qt.NoPen)
-                        painter.drawRoundedRect(food_x - 14, int(food_y), 28, 22, 6, 6)
-                        painter.setBrush(QBrush(QColor(200, 160, 70)))
-                        painter.drawEllipse(food_x - 8, int(food_y + 4), 16, 12)
-                        painter.setPen(QPen(QColor(100, 80, 50), 1))
-                        painter.drawLine(food_x - 4, int(food_y + 8), food_x + 4, int(food_y + 8))
-                        painter.drawLine(food_x - 2, int(food_y + 6), food_x + 2, int(food_y + 14))
+                        painter.drawRoundedRect(food_x, int(food_y), 40, 28, 8, 8)
+                        painter.setBrush(QBrush(QColor(230, 190, 80)))
+                        painter.drawEllipse(food_x + 4, int(food_y + 4), 32, 16)
+                        # Noodle lines
+                        painter.setPen(QPen(QColor(160, 120, 70), 2))
+                        painter.drawLine(food_x + 8, int(food_y + 10), food_x + 32, int(food_y + 10))
+                        painter.drawLine(food_x + 12, int(food_y + 14), food_x + 28, int(food_y + 14))
+                        painter.setPen(QPen(QColor(200, 50, 50), 2))
+                        painter.drawLine(food_x + 10, int(food_y + 18), food_x + 30, int(food_y + 18))
                 painter.end()
             frames.append(pix)
         self._cache[AnimationType.FEED] = frames
-
     def prerender_jump(self):
         frames = []
         w, h = self.pet_size
@@ -245,16 +230,7 @@ class FrameGenerator:
 
     def _copy_base(self):
         if self.base_pixmap:
-            pix = QPixmap(*self.pet_size)
-            pix.fill(Qt.transparent)
-            if pix is not None:
-                pw, ph = self.pet_size
-                bw = self.base_pixmap.width()
-                bh = self.base_pixmap.height()
-                p = QPainter(pix)
-                p.drawPixmap((pw - bw) // 2, ph - bh, self.base_pixmap)
-                p.end()
-            return pix
+            return QPixmap(self.base_pixmap)
         pix = QPixmap(*self.pet_size)
         pix.fill(Qt.transparent)
         return pix
@@ -265,7 +241,7 @@ class AnimationEngine:
     FRAME_MS = 1000 // FPS
 
     ANIM_CONFIG = {
-        AnimationType.WAVE: {"frames": 16, "loop": False},
+        AnimationType.WAVE: {"frames": 13, "loop": False},
         AnimationType.JUMP: {"frames": 30, "loop": False},
         AnimationType.WALK: {"frames": 20, "loop": False},
         AnimationType.FEED: {"frames": 51, "loop": False},

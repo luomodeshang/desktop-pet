@@ -25,6 +25,7 @@ os.makedirs(CONFIG_DIR, exist_ok=True)
 PHOTO_CACHE = os.path.join(IMAGES_DIR, "user_pet.png")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "pet_config.json")
 DEFAULT_PHOTO = os.path.join(IMAGES_DIR, "jiejie.jpg")
+JUMP_OFFSET = 80  # Extra window height so jump doesn't clip
 
 class DesktopPet(QWidget):
     def __init__(self, photo_path=None):
@@ -34,7 +35,6 @@ class DesktopPet(QWidget):
         self.size_options = [100, 150, 200, 250, 300]
         self.pet_w = self.size_options[self.pet_size_index]
         self.pet_h = self.size_options[self.pet_size_index]
-        self.pet_render_h = int(self.pet_h * 1.5)
         self.is_dragging = False
         self.drag_position = QPoint()
         self.last_interaction = datetime.now()
@@ -48,7 +48,7 @@ class DesktopPet(QWidget):
         self.init_ui()
         self.renderer = None
         self.animator = None
-        self.frame_generator = FrameGenerator(pet_size=(self.pet_w, self.pet_render_h))
+        self.frame_generator = FrameGenerator(pet_size=(self.pet_w, self.pet_h))
         self.engine = AnimationEngine(frame_generator=self.frame_generator, on_render=self._on_render_callback)
         self._init_avatar()
         self.init_tray()
@@ -59,11 +59,12 @@ class DesktopPet(QWidget):
         print("[OK] Desktop Pet started!")
 
     def init_ui(self):
+        self.window_h = self.pet_h + JUMP_OFFSET
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.resize(self.pet_w, self.pet_render_h)
+        self.resize(self.pet_w, self.window_h)
         screen = QApplication.primaryScreen().geometry()
-        self.move(screen.width()-self.pet_w-40, screen.height()-self.pet_render_h-80)
+        self.move(screen.width()-self.pet_w-40, screen.height()-self.window_h-80)
         self.setMouseTracking(True)
 
     def _init_avatar(self):
@@ -137,7 +138,7 @@ class DesktopPet(QWidget):
             self.resize(self.pet_w,self.pet_h)
             if self.renderer:
                 pix=self.renderer.render((self.pet_w,self.pet_h))
-                self.frame_generator.set_base_image(pix); self.frame_generator.set_pet_size(self.pet_w,self.pet_render_h)
+                self.frame_generator.set_base_image(pix); self.frame_generator.set_pet_size(self.pet_w,self.pet_h)
             for i,a in enumerate(self._size_actions): a.setChecked(i==idx)
             self.save_config()
 
@@ -168,9 +169,13 @@ class DesktopPet(QWidget):
         if fr is None and hasattr(self,'animator') and self.animator:
             fr=self.animator.update()
         if fr:
-            # Frame is already sized to (pet_w, pet_render_h) by FrameGenerator
-            # Draw it filling the window
-            p.drawPixmap(0, 0, fr)
+            pixmap = fr
+            if pixmap.size().width() != self.pet_w or pixmap.size().height() != self.pet_h:
+                pixmap = pixmap.scaled(self.pet_w, self.pet_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            # Draw at bottom so jump has room above
+            draw_y = self.window_h - pixmap.height()
+            draw_x = (self.pet_w - pixmap.width()) // 2
+            p.drawPixmap(draw_x, draw_y, pixmap)
 
     def mousePressEvent(self,ev):
         if ev.button()==Qt.LeftButton: self._trigger_action(); self.last_interaction=datetime.now()
