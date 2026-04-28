@@ -101,7 +101,7 @@ class FrameGenerator:
                 painter = QPainter(pix)
                 painter.setRenderHint(QPainter.Antialiasing)
                 rad = angle * 3.14159 / 180
-                arm_len = int(w * 0.07)  # arm length proportional to width
+                arm_len = int(w * 0.10)  # arm length proportional to width (big wave)
                 hand_x = shoulder_x + int(arm_len * np.cos(rad))
                 hand_y = shoulder_y - int(arm_len * np.abs(np.sin(rad))*0.5)
                 hand_size = max(5, int(w * 0.048))
