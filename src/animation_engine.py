@@ -111,7 +111,7 @@ class FrameGenerator:
                 food_y = -40 + min(i * 2, 60)
                 if food_y < 80 and progress < 0.5:
                     food_x = w // 2 - 20
-                    if 'burger' in food_name or 'fried' in food_name or 'chicken' in food_name:
+                    if 'burger' in food_name and 'fried' not in food_name and 'chicken' not in food_name:
                         # Burger style
                         painter.setBrush(QBrush(QColor(220, 160, 80)))
                         painter.setPen(Qt.NoPen)
@@ -120,25 +120,17 @@ class FrameGenerator:
                         painter.drawRect(food_x + 3, int(food_y + 10), 34, 10)
                         painter.setBrush(QBrush(QColor(220, 160, 80)))
                         painter.drawEllipse(food_x, int(food_y + 18), 40, 12)
-                        # Burger detail
+                        # Lettuce line
                         painter.setPen(QPen(QColor(100, 200, 80), 2))
                         painter.drawLine(food_x + 10, int(food_y + 15), food_x + 30, int(food_y + 15))
-                    elif 'fried' in food_name and 'chicken' in food_name:
+                    elif 'fried' in food_name or 'chicken' in food_name:
                         # Drumstick
                         painter.setBrush(QBrush(QColor(200, 130, 50)))
                         painter.setPen(Qt.NoPen)
                         painter.drawEllipse(food_x + 4, int(food_y + 2), 32, 18)
                         painter.setBrush(QBrush(QColor(220, 160, 100)))
                         painter.drawRoundedRect(food_x + 8, int(food_y), 16, 22, 4, 4)
-                        painter.setPen(QPen(QColor(180, 140, 100), 2))
-                        painter.drawLine(food_x + 30, int(food_y + 10), food_x + 38, int(food_y + 14))
-                    elif 'chicken' in food_name:
-                        # Drumstick (same as fried chicken)
-                        painter.setBrush(QBrush(QColor(200, 130, 50)))
-                        painter.setPen(Qt.NoPen)
-                        painter.drawEllipse(food_x + 4, int(food_y + 2), 32, 18)
-                        painter.setBrush(QBrush(QColor(220, 160, 100)))
-                        painter.drawRoundedRect(food_x + 8, int(food_y), 16, 22, 4, 4)
+                        # Bone line
                         painter.setPen(QPen(QColor(180, 140, 100), 2))
                         painter.drawLine(food_x + 30, int(food_y + 10), food_x + 38, int(food_y + 14))
                     else:
@@ -167,7 +159,7 @@ class FrameGenerator:
             painter = QPainter(pix)
             painter.setRenderHint(QPainter.Antialiasing)
             progress = i / total
-            jump_y = int(65 * np.sin(progress * np.pi))
+            jump_y = int(100 * np.sin(progress * np.pi))
             if progress < 0.15:
                 squash = 1.0 - 0.08 * (progress / 0.15)
             elif progress < 0.5:
