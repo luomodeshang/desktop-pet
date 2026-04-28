@@ -75,6 +75,10 @@ class FaceFeatures:
         self.eye_spacing = 0.5
         self.eye_size = 0.12
         self.face_ratio = 1.0
+        self.hair_brightness = 128
+        self.hair_dark = (0, 0, 0)
+        self.hair_light = (0, 0, 0)
+        self.hair_top_offset = 0
 
 
 def extract_face_features(image_path):
@@ -114,13 +118,41 @@ def extract_face_features(image_path):
         features.skin_color = np.median(cheek_region, axis=(0, 1)).astype(int)
         features.skin_color = np.clip(features.skin_color * 1.15, 0, 255).astype(int)
 
-    # --- 头发 ---
+    # --- 头发（增强版） ---
     if y > 10:
-        hair_y = max(0, y - int(fh * 0.25))
-        hair_region = img[hair_y:max(0, y - 5),
-                          x + int(fw * 0.15):x + int(fw * 0.85)]
-        if hair_region.size > 0:
-            features.hair_color = np.median(hair_region, axis=(0, 1)).astype(int)
+        hair_y = max(0, y - int(fh * 0.35))
+        hair_end = max(0, y - 5)
+        hair_left = x + int(fw * 0.10)
+        hair_right = x + int(fw * 0.90)
+        if hair_end > hair_y and hair_right > hair_left:
+            hair_region = img[hair_y:hair_end, hair_left:hair_right]
+            if hair_region.size > 0:
+                features.hair_color = np.median(hair_region, axis=(0, 1)).astype(int)
+                # 提取头发主色的深浅层次（发根暗、发梢亮）
+                h_gray = cv2.cvtColor(hair_region, cv2.COLOR_BGR2GRAY)
+                h_median_brightness = np.median(h_gray)
+                features.hair_brightness = h_median_brightness
+                # 提取头发区域中较亮和较暗的部分作为辅助色
+                _, dark_mask = cv2.threshold(h_gray, max(0, h_median_brightness - 20), 255, cv2.THRESH_BINARY_INV)
+                if np.sum(dark_mask > 0) > 50:
+                    dark_px = hair_region[dark_mask > 0]
+                    features.hair_dark = np.median(dark_px, axis=0).astype(int)
+                else:
+                    features.hair_dark = features.hair_color
+                _, light_mask = cv2.threshold(h_gray, min(255, h_median_brightness + 30), 255, cv2.THRESH_BINARY)
+                if np.sum(light_mask > 0) > 50:
+                    light_px = hair_region[light_mask > 0]
+                    features.hair_light = np.median(light_px, axis=0).astype(int)
+                else:
+                    features.hair_light = np.clip(features.hair_color * 1.3, 0, 255).astype(int)
+                # 头发区域轮廓点（顶部弧线）
+                hair_top_y = hair_region.shape[0]
+                for py in range(hair_region.shape[0]-1, 0, -1):
+                    row = h_gray[py, :]
+                    if np.mean(row) < 150:
+                        hair_top_y = py
+                        break
+                features.hair_top_offset = hair_top_y  # 从头顶边界到头发顶部的偏移
 
     # --- 瞳孔 ---
     eye_y = y + int(fh * 0.28)
@@ -447,53 +479,130 @@ class QAvatarRenderer:
                           blush_r * 2, blush_r)
 
     def _draw_hair(self, painter, top_left, size, params):
-        """绘制头发（带飘动效果）"""
+        """绘制头发（增强版：多层次+渐变+飘动）"""
         x, y = top_left.x(), top_left.y()
-        hair = self.features.hair_color
-        if not self.features.has_face:
+        feat = self.features
+        hair = feat.hair_color
+        if not feat.has_face:
             hair = np.array([50, 40, 30])
 
         hair_color = QColor(int(hair[2]), int(hair[1]), int(hair[0]))
-        wave_phase = params.hair_wave_phase
-
-        # 主头发
-        hair_path = QPainterPath()
-        hair_path.moveTo(x + int(size * 0.02), y + int(size * 0.25))
-        
-        # 头发飘动——控制点随相位左右摆动
-        sway = 4 * math.sin(wave_phase)
-        
-        hair_path.cubicTo(
-            x + int(size * 0.02) + int(sway), y - int(size * 0.05),
-            x + size - int(size * 0.02) + int(sway), y - int(size * 0.05),
-            x + size - int(size * 0.02), y + int(size * 0.25)
+        hair_dark_c = QColor(
+            min(int(feat.hair_dark[2]), 255),
+            min(int(feat.hair_dark[1]), 255),
+            min(int(feat.hair_dark[0]), 255)
         )
+        hair_light_c = QColor(
+            min(int(feat.hair_light[2]), 255),
+            min(int(feat.hair_light[1]), 255),
+            min(int(feat.hair_light[0]), 255)
+        )
+        wave = params.hair_wave_phase
 
-        painter.setBrush(QBrush(hair_color))
+        # 主头发区域（圆润的帽子形状，带发丝感）
+        main_path = QPainterPath()
+        main_path.moveTo(x + int(size * 0.02), y + int(size * 0.15))
+        sway = 5 * math.sin(wave)
+        # 头顶弧线
+        main_path.cubicTo(
+            x + int(size * 0.15) + int(sway*0.5), y - int(size * 0.08),
+            x + int(size * 0.55) + int(sway), y - int(size * 0.12),
+            x + int(size * 0.85) + int(sway*0.5), y - int(size * 0.08),
+        )
+        # 右缘下至侧脸
+        main_path.cubicTo(
+            x + size - int(size * 0.02) + int(sway*0.3), y + int(size * 0.05),
+            x + size + int(sway*0.2), y + int(size * 0.15),
+            x + size + int(sway*0.3), y + int(size * 0.35)
+        )
+        # 底部弧线回左侧
+        main_path.cubicTo(
+            x + size + int(sway*0.1), y + int(size * 0.45),
+            x + int(sway*0.1), y + int(size * 0.45),
+            x + int(sway*0.3), y + int(size * 0.35)
+        )
+        main_path.cubicTo(
+            x + int(sway*0.2), y + int(size * 0.15),
+            x + int(size * 0.02) + int(sway*0.3), y + int(size * 0.05),
+            x + int(size * 0.02), y + int(size * 0.15)
+        )
+        # 绘制主头发填充（带深色阴影）
+        painter.setBrush(QBrush(hair_dark_c))
         painter.setPen(Qt.NoPen)
-        painter.drawPath(hair_path)
+        painter.drawPath(main_path)
 
-        # 刘海（带飘动）
-        painter.setPen(QPen(hair_color, 3))
+        # 中层头发（主色，略微缩小叠加在深色上，制造层次感）
+        mid_path = QPainterPath()
+        mid_path.moveTo(x + int(size * 0.05), y + int(size * 0.17))
+        mid_path.cubicTo(
+            x + int(size * 0.18), y - int(size * 0.05),
+            x + int(size * 0.55) + int(sway), y - int(size * 0.09),
+            x + int(size * 0.82), y - int(size * 0.05),
+        )
+        mid_path.cubicTo(
+            x + size - int(size * 0.05), y + int(size * 0.05),
+            x + size - 2 + int(sway*0.2), y + int(size * 0.15),
+            x + size - 2 + int(sway*0.3), y + int(size * 0.30)
+        )
+        mid_path.cubicTo(
+            x + size - 2 + int(sway*0.1), y + int(size * 0.38),
+            x + 2 + int(sway*0.1), y + int(size * 0.38),
+            x + 2 + int(sway*0.3), y + int(size * 0.30)
+        )
+        mid_path.cubicTo(
+            x + 2 + int(sway*0.2), y + int(size * 0.15),
+            x + int(size * 0.05), y + int(size * 0.05),
+            x + int(size * 0.05), y + int(size * 0.17)
+        )
+        painter.setBrush(QBrush(hair_color))
+        painter.drawPath(mid_path)
+
+        # 亮部发丝线（高光）
         painter.setBrush(Qt.NoBrush)
-        bangs_count = 5
-        for i in range(bangs_count):
-            bx = x + int(size * (0.15 + i * 0.16))
-            by = y + int(size * 0.12)
-            # 刘海每根微微摆动
-            sway_i = 2 * math.sin(wave_phase + i * 1.2)
-            end_y = y + int(size * (0.22 + (i % 2) * 0.06))
-            painter.drawLine(bx, by, bx + int(sway_i), end_y)
+        painter.setPen(QPen(hair_light_c, 2))
+        strand_count = 8
+        for i in range(strand_count):
+            px = x + int(size * (0.12 + i * 0.09))
+            sway_i = 3 * math.sin(wave + i * 0.8)
+            start_y = y + int(size * 0.02) + int(sway_i)
+            end_y = y + int(size * (0.10 + (i % 3) * 0.03))
+            painter.drawLine(px + sway_i, start_y, px + sway_i, end_y)
 
-        # 两侧头发（侧发飘动）
-        side_sway = 3 * math.sin(wave_phase + 2.0)
+        # 刘海（多根渐变）
         painter.setPen(QPen(hair_color, 4))
-        # 左侧
-        painter.drawLine(x, y + int(size * 0.2),
-                        x + int(side_sway), y + int(size * 0.55))
-        # 右侧
-        painter.drawLine(x + size, y + int(size * 0.2),
-                        x + size + int(-side_sway), y + int(size * 0.55))
+        painter.setBrush(Qt.NoBrush)
+        bangs = 7
+        for i in range(bangs):
+            bx = x + int(size * (0.10 + i * 0.11))
+            by = y + int(size * 0.10)
+            sway_b = 3 * math.sin(wave + i * 0.7)
+            end_h = y + int(size * (0.18 + (i % 3) * 0.06))
+            # 刘海线条颜色渐变（从主色到亮色）
+            ratio = i / max(1, bangs - 1)
+            r = int(hair[2] * (1 - ratio) + feat.hair_light[2] * ratio)
+            g = int(hair[1] * (1 - ratio) + feat.hair_light[1] * ratio)
+            b = int(hair[0] * (1 - ratio) + feat.hair_light[0] * ratio)
+            painter.setPen(QPen(QColor(min(r,255), min(g,255), min(b,255)), 3 - (i % 2)))
+            painter.drawLine(bx + sway_b, by, bx + sway_b, end_h)
+
+        # 两侧头发（多缕叠加）
+        side_sway = 4 * math.sin(wave + 1.5)
+        # 左侧：两缕
+        for lyr in range(2):
+            opacity = 180 if lyr == 0 else 120
+            thickness = 5 if lyr == 0 else 3
+            lx = x + lyr * 3
+            painter.setPen(QPen(QColor(hair[2], hair[1], hair[0], opacity), thickness))
+            painter.drawLine(lx + side_sway, y + int(size * 0.15),
+                          lx + int(side_sway * 0.7), y + int(size * 0.55))
+        # 右侧：两缕
+        for lyr in range(2):
+            opacity = 180 if lyr == 0 else 120
+            thickness = 5 if lyr == 0 else 3
+            rx = x + size - lyr * 3
+            painter.setPen(QPen(QColor(hair[2], hair[1], hair[0], opacity), thickness))
+            painter.drawLine(rx - side_sway, y + int(size * 0.15),
+                          rx - int(side_sway * 0.7), y + int(size * 0.55))
 
     def _draw_body(self, painter, center, width, height, params):
         """绘制Q版小身体（带衣服颜色和呼吸微动）"""

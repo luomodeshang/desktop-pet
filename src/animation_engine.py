@@ -120,6 +120,73 @@ class FrameGenerator:
             frames.append(pix)
         self._cache[AnimationType.FEED] = frames
 
+    def prerender_jump(self):
+        frames = []
+        w, h = self.pet_size
+        total = 30
+        for i in range(total):
+            pix = QPixmap(w, h)
+            pix.fill(Qt.transparent)
+            painter = QPainter(pix)
+            painter.setRenderHint(QPainter.Antialiasing)
+            progress = i / total
+            jump_y = int(65 * np.sin(progress * np.pi))
+            if progress < 0.15:
+                squash = 1.0 - 0.08 * (progress / 0.15)
+            elif progress < 0.5:
+                squash = 0.92 - 0.08 * ((progress - 0.15) / 0.35)
+            elif progress < 0.85:
+                squash = 0.84 + 0.08 * ((progress - 0.5) / 0.35)
+            else:
+                squash = 0.92 + 0.08 * ((progress - 0.85) / 0.15)
+            scale_y = squash
+            scale_x = 1.0 / squash if squash > 0 else 1.0
+            shadow_size = 0.5 + 0.5 * (1.0 - progress) if progress < 0.5 else 0.5 + 0.5 * progress
+            shadow_alpha = int(max(20, 100 - int(jump_y * 1.2)))
+            painter.setBrush(QBrush(QColor(0, 0, 0, shadow_alpha)))
+            painter.setPen(Qt.NoPen)
+            sw = int(w * 0.45 * shadow_size)
+            painter.drawEllipse(w//2 - sw//2, h - 8, sw, 6)
+            if self.base_pixmap:
+                sw2 = max(1, int(w * scale_x))
+                sh2 = max(1, int(h * scale_y))
+                scaled = self.base_pixmap.scaled(sw2, sh2, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                draw_x = (w - scaled.width()) // 2
+                draw_y = h - scaled.height() - jump_y - 10
+                painter.drawPixmap(draw_x, draw_y, scaled)
+            painter.end()
+            frames.append(pix)
+        self._cache[AnimationType.JUMP] = frames
+
+    def prerender_walk(self):
+        frames = []
+        w, h = self.pet_size
+        total = 20
+        for i in range(total):
+            pix = QPixmap(w, h)
+            pix.fill(Qt.transparent)
+            painter = QPainter(pix)
+            painter.setRenderHint(QPainter.Antialiasing)
+            angle = i * 2 * np.pi / total
+            offset_x = int(22 * np.sin(angle))
+            bounce_y = int(5 * abs(np.sin(angle)))
+            if self.base_pixmap:
+                scaled = self.base_pixmap.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                draw_x = (w - scaled.width()) // 2 + offset_x
+                draw_y = h - scaled.height() - bounce_y
+                painter.drawPixmap(draw_x, draw_y, scaled)
+                foot_offset = int(12 * np.sin(angle))
+                foot_color = QColor(70, 50, 35)
+                painter.setBrush(QBrush(foot_color))
+                painter.setPen(Qt.NoPen)
+                painter.drawRoundedRect(w//2 + foot_offset - 8, h - 10, 8, 8, 3, 3)
+                painter.drawRoundedRect(w//2 - foot_offset, h - 10, 8, 8, 3, 3)
+                painter.setPen(QPen(QColor(200, 200, 200, 100), 1))
+                painter.drawLine(draw_x - 2, h - 5, draw_x + scaled.width() + 2, h - 5)
+            painter.end()
+            frames.append(pix)
+        self._cache[AnimationType.WALK] = frames
+
     def prerender_none(self):
         pix = self._copy_base()
         self._cache[AnimationType.NONE] = [pix]
@@ -188,6 +255,10 @@ class AnimationEngine:
                 self.generator.prerender_wave()
             elif anim_type == AnimationType.FEED:
                 self.generator.prerender_feed()
+            elif anim_type == AnimationType.JUMP:
+                self.generator.prerender_jump()
+            elif anim_type == AnimationType.WALK:
+                self.generator.prerender_walk()
             elif anim_type == AnimationType.NONE:
                 self.generator.prerender_none()
 
