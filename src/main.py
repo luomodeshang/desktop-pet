@@ -158,7 +158,7 @@ class DesktopPet(QWidget):
         if hasattr(self,'engine') and self.engine: self.engine.stop()
         QApplication.quit()
 
-    def _on_render_callback(self,at,fi): pass
+    def _on_render_callback(self,at,fi): self.update()
 
     def paintEvent(self,ev):
         p=QPainter(self); p.setRenderHint(QPainter.Antialiasing)
