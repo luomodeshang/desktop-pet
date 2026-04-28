@@ -24,6 +24,7 @@ os.makedirs(IMAGES_DIR, exist_ok=True)
 os.makedirs(CONFIG_DIR, exist_ok=True)
 PHOTO_CACHE = os.path.join(IMAGES_DIR, "user_pet.png")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "pet_config.json")
+DEFAULT_PHOTO = os.path.join(IMAGES_DIR, "jiejie.jpg")
 
 class DesktopPet(QWidget):
     def __init__(self, photo_path=None):
@@ -67,6 +68,8 @@ class DesktopPet(QWidget):
     def _init_avatar(self):
         if self.photo_path and os.path.exists(self.photo_path):
             self._create_from_photo(self.photo_path); return
+        if os.path.exists(DEFAULT_PHOTO):
+            self._create_from_photo(DEFAULT_PHOTO); return
         photo = self.config.get("user_photo")
         if photo and os.path.exists(photo):
             self._create_from_photo(photo); return
@@ -151,20 +154,13 @@ class DesktopPet(QWidget):
         p=QPainter(self); p.setRenderHint(QPainter.Antialiasing)
         fr=None
         if hasattr(self,'engine') and self.engine: fr=self.engine.get_current_frame()
-        if fr is None and self.animator: fr=self.animator.update()
-        if fr: p.drawPixmap(0,0,fr.scaled(self.pet_w,self.pet_h,Qt.KeepAspectRatio,Qt.SmoothTransformation))
-        if hasattr(self,'engine') and self.engine.state.is_playing and self.engine.state.anim_type==AnimationType.FEED:
-            fn=getattr(self.engine.state,'food_name','')
-            if fn:
-                w,h=self.pet_w,self.pet_h
-                pr=self.engine.state.frame/max(1,self.engine.state.total_frames)
-                fy=int(-40+min(pr*120,60))
-                if fy<80 and pr<0.5:
-                    c=self.food_colors.get(fn,(255,180,50))
-                    p.setBrush(QBrush(QColor(*c))); p.setPen(QPen(QColor(180,120,30),2))
-                    p.drawRoundedRect(w//2-15,fy,30,30,5,5)
-                    p.setFont(QFont("Arial",9)); p.setPen(QColor(255,100,100))
-                    p.drawText(w//2-30,fy+45,fn)
+        if fr is None and hasattr(self,'animator') and self.animator:
+            fr=self.animator.update()
+        if fr:
+            pixmap = fr
+            if pixmap.size().width() != self.pet_w or pixmap.size().height() != self.pet_h:
+                pixmap = pixmap.scaled(self.pet_w, self.pet_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            p.drawPixmap(0, 0, pixmap)
 
     def mousePressEvent(self,ev):
         if ev.button()==Qt.LeftButton: self._trigger_action(); self.last_interaction=datetime.now()

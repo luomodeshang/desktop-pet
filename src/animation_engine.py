@@ -205,8 +205,8 @@ class AnimationEngine:
 
     ANIM_CONFIG = {
         AnimationType.WAVE: {"frames": 13, "loop": False},
-        AnimationType.JUMP: {"frames": 25, "loop": False},
-        AnimationType.WALK: {"frames": 15, "loop": False},
+        AnimationType.JUMP: {"frames": 30, "loop": False},
+        AnimationType.WALK: {"frames": 20, "loop": False},
         AnimationType.FEED: {"frames": 51, "loop": False},
     }
 
@@ -225,14 +225,16 @@ class AnimationEngine:
     def _tick(self):
         if not self.is_running:
             return
-        if self.state.is_playing and self.state.anim_type != AnimationType.NONE:
-            still_playing = self.state.advance()
-            if not still_playing:
-                self.state.anim_type = AnimationType.NONE
-                self.state.is_playing = True
-            if self.on_render:
-                self.on_render(self.state.anim_type, self.state.frame)
-        else:
+        if self.state.is_playing:
+            if self.state.anim_type != AnimationType.NONE:
+                still_playing = self.state.advance()
+                if not still_playing:
+                    self.state.anim_type = AnimationType.NONE
+                    self.state.is_playing = True
+                if self.on_render:
+                    self.on_render(self.state.anim_type, self.state.frame)
+                return
+            # Idle loop: advance frame counter for visual variety
             self.state.frame = (self.state.frame + 1) % 1000000
             if self.on_render:
                 self.on_render(AnimationType.NONE, 0)
