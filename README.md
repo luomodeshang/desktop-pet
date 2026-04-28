@@ -114,6 +114,8 @@ desktop-pet/
 
 | 版本 | 亮点 | 详细说明 |
 |------|------|----------|
+| **v3.0.13** | 窗口加高 + 喂食改进 + 挥手自然 | 窗体高度改为1.5倍，跳跃不会出界；三种食物不同食材图案+手部动作+去掉吃完表情；挥手改用弧形摆臂+身体微晃 |
+| **v3.0.12** | 修复动画不刷新 | 回调中触发self.update()，动画帧能实时显示 |
 | **v3.0.11** | 修复初始渲染 + 托盘图标 + 默认照片 | 修复打开时人物不显示（base_pixmap在初始化时为空）；托盘图标改为使用Q版头像；默认使用assets/images/jiejie.jpg |
 | **v3.0.10** | 修复 random 导入错误 | qavatar_generator.py 缺失 import random 导致 Windows 下 NameError |
 | **v3.0.9** | 修复 Windows 模块导入路径 | python src/main.py 运行时 from src.qavatar_generator 找不到模块；添加 sys.path 修正 |

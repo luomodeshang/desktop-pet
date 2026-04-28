@@ -34,6 +34,7 @@ class DesktopPet(QWidget):
         self.size_options = [100, 150, 200, 250, 300]
         self.pet_w = self.size_options[self.pet_size_index]
         self.pet_h = self.size_options[self.pet_size_index]
+        self.pet_render_h = int(self.pet_h * 1.5)
         self.is_dragging = False
         self.drag_position = QPoint()
         self.last_interaction = datetime.now()
@@ -47,7 +48,7 @@ class DesktopPet(QWidget):
         self.init_ui()
         self.renderer = None
         self.animator = None
-        self.frame_generator = FrameGenerator(pet_size=(self.pet_w, self.pet_h))
+        self.frame_generator = FrameGenerator(pet_size=(self.pet_w, self.pet_render_h))
         self.engine = AnimationEngine(frame_generator=self.frame_generator, on_render=self._on_render_callback)
         self._init_avatar()
         self.init_tray()
@@ -60,9 +61,9 @@ class DesktopPet(QWidget):
     def init_ui(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.resize(self.pet_w, self.pet_h)
+        self.resize(self.pet_w, self.pet_render_h)
         screen = QApplication.primaryScreen().geometry()
-        self.move(screen.width()-self.pet_w-40, screen.height()-self.pet_h-80)
+        self.move(screen.width()-self.pet_w-40, screen.height()-self.pet_render_h-80)
         self.setMouseTracking(True)
 
     def _init_avatar(self):
@@ -136,7 +137,7 @@ class DesktopPet(QWidget):
             self.resize(self.pet_w,self.pet_h)
             if self.renderer:
                 pix=self.renderer.render((self.pet_w,self.pet_h))
-                self.frame_generator.set_base_image(pix); self.frame_generator.set_pet_size(self.pet_w,self.pet_h)
+                self.frame_generator.set_base_image(pix); self.frame_generator.set_pet_size(self.pet_w,self.pet_render_h)
             for i,a in enumerate(self._size_actions): a.setChecked(i==idx)
             self.save_config()
 
@@ -167,10 +168,9 @@ class DesktopPet(QWidget):
         if fr is None and hasattr(self,'animator') and self.animator:
             fr=self.animator.update()
         if fr:
-            pixmap = fr
-            if pixmap.size().width() != self.pet_w or pixmap.size().height() != self.pet_h:
-                pixmap = pixmap.scaled(self.pet_w, self.pet_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            p.drawPixmap(0, 0, pixmap)
+            # Frame is already sized to (pet_w, pet_render_h) by FrameGenerator
+            # Draw it filling the window
+            p.drawPixmap(0, 0, fr)
 
     def mousePressEvent(self,ev):
         if ev.button()==Qt.LeftButton: self._trigger_action(); self.last_interaction=datetime.now()
@@ -212,7 +212,7 @@ class DesktopPet(QWidget):
         self._feeding_lock=True; self.last_interaction=datetime.now(); self.current_state="standing"
         print(f"[FEED] {fn}")
         if hasattr(self,'engine') and self.engine:
-            self.engine.state.food_name=fn; self.engine.play(AnimationType.FEED)
+            self.engine.state.food_name=fn; self.engine.generator._feed_food_type=fn; self.engine.play(AnimationType.FEED)
         h=self.config.get("food_history",[])
         h.append({"food":fn,"time":datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
         self.config["food_history"]=h; self.save_config()
