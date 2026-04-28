@@ -1,15 +1,16 @@
-
+#!/usr/bin/env python3
 """
-Q版小人生成器 + Live2D风格动画引擎
+Q版小人生成器 V4 + Live2D风格动画引擎 (MediaPipe FaceMesh版)
+基于MediaPipe 478点3D面部网格，提取精确面部特征并Q版化渲染
+
 功能：
-  1. 从照片提取面部特征 → 生成Q版角色
-  2. 提取衣服颜色 → 角色穿同色衣服
-  3. Live2D风格动画：呼吸、眨眼、头发飘动、身体微晃
-  4. 支持动画帧序列生成（直接给AnimationEngine使用）
+  1. MediaPipe FaceMesh: 478点面部关键点检测（4MB onnx模型）
+  2. 精确脸型：基于实际下颌线/下巴轮廓的Q版化
+  3. 个性化五官：眼型、嘴型、鼻型基于实际landmarks映射
+  4. Live2D风格动画：呼吸、眨眼、头发飘动、表情驱动
 """
 
-import os, random
-import cv2
+import os, random, math
 import numpy as np
 from PyQt5.QtCore import Qt, QPoint, QRect
 from PyQt5.QtGui import (
@@ -17,798 +18,1035 @@ from PyQt5.QtGui import (
     QPainterPath, QImage
 )
 from enum import Enum, auto
-import math
 
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 
-# ====== 动画参数 ======
-# Live2D风格的动画参数，可在运行时修改
+try:
+    from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions, RunningMode
+    from mediapipe.tasks.python import BaseOptions
+    from mediapipe import Image, ImageFormat
+    _HAS_MEDIAPIPE = True
+except ImportError:
+    _HAS_MEDIAPIPE = False
+
+# ====== Live2D动画参数 ======
 class Live2DParams:
     """Live2D风格动画的实时参数"""
     def __init__(self):
-        # 呼吸
-        self.breath_phase = 0.0       # 呼吸相位 (0~2pi)
-        self.breath_amplitude = 0.02  # 呼吸幅度 (身体缩放)
-        
-        # 眨眼
-        self.blink_state = "open"     # open / closing / closed / opening
-        self.blink_timer = 0
-        self.blink_interval = 180     # 帧间隔（60FPS下约3秒）
-        self.blink_duration = 6       # 眨眼持续帧数
-        
-        # 头发飘动
-        self.hair_wave_phase = 0.0
-        
-        # 身体晃动
+        self.breath_phase = 0.0
+        self.breath_amplitude = 0.02
         self.body_sway_phase = 0.0
-        
-        # 面部表情控制 (0.0 ~ 1.0)
-        self.eye_open = 1.0           # 1=全开, 0=全闭
-        self.mouth_open = 0.0         # 0=闭嘴, 1=张嘴
-        self.mouth_width = 1.0        # 嘴巴宽度比例
-        self.brow_raise = 0.0         # 眉毛抬起
-        self.happiness = 0.5          # 开心程度
-        self.anger = 0.0
-        self.surprise = 0.0
-        self.eye_direction_x = 0.0    # 眼睛看向 -1~1
+        self.body_sway_amplitude = 1.5
+        self.eye_open = 1.0
+        self.eye_direction_x = 0.0
         self.eye_direction_y = 0.0
+        self.hair_wave_phase = 0.0
+        self.happiness = 0.5
+        self.surprise = 0.0
+        self.anger = 0.0
+        self.mouth_open = 0.0
+        self.brow_raise = 0.0
+
+class AnimationType(Enum):
+    NONE = auto()
+    IDLE = auto()
+    BLINK = auto()
+    SPEAK = auto()
 
 
-# ====== 人脸特征提取（增强版） ======
-
+# ====== 面部特征数据结构 ======
 class FaceFeatures:
-    """提取的人脸特征数据（增强版，新增衣物颜色）"""
+    """从照片提取的面部特征数据，供渲染器使用"""
     def __init__(self):
         self.has_face = False
-        self.face_rect = None
-        self.skin_color = (0, 0, 0)
-        self.hair_color = (0, 0, 0)
-        self.eye_color = (0, 0, 0)
-        self.lip_color = (0, 0, 0)
-        self.clothes_color = (0, 0, 0)    # 新增：衣服主色
-        self.clothes_secondary = (0, 0, 0) # 新增：衣服副色
-        self.face_shape = "round"
-        self.face_width_ratio = 0.85
-        self.center_x = 0
-        self.center_y = 0
-        self.mouth_y = 0
-        self.forehead_height = 0.3
-        self.eye_spacing = 0.5
-        self.eye_size = 0.12
-        self.face_ratio = 1.0
-        self.hair_brightness = 128
-        self.hair_dark = (0, 0, 0)
-        self.hair_light = (0, 0, 0)
-        self.hair_top_offset = 0
+        self.mediapipe_detected = False  # True = MediaPipe, False = OpenCV fallback
+        
+        # === 从照片提取的颜色 ===
+        self.skin_color = (200, 170, 150)    # BGR
+        self.hair_color = (50, 40, 30)
+        self.hair_dark = (40, 30, 20)
+        self.hair_light = (80, 70, 60)
+        self.eye_color = (30, 30, 30)
+        self.lip_color = (80, 80, 160)
+        self.clothes_color = (80, 100, 180)
+        self.clothes_secondary = (180, 180, 200)
+        
+        # === 面部关键点 (normalized 0-1) ===
+        # 这些是 MediaPipe 478 点网格中提取的关键索引
+        # 格式: (x, y) 归一化坐标，x=0左 y=0上
+        self.landmarks = {}  # {name: (x, y)} 或 None
+        
+        # === 面部比例 ===
+        self.face_w = 0.0     # 脸宽
+        self.face_h = 0.0     # 脸高（前额到下巴）
+        self.face_aspect = 1.0  # 宽高比
+        self.eye_distance = 0.0  # 眼间距
+        self.eye_to_mouth = 0.0  # 眼到嘴距离
+        
+    def is_valid(self):
+        return self.has_face
 
 
-def extract_face_features(image_path):
-    """从照片中提取人脸特征（增强版：加衣服颜色）"""
+# ====== MediaPipe 面部特征提取 ======
+_FACE_LANDMARKER = None
+
+def _get_landmarker():
+    global _FACE_LANDMARKER
+    if _FACE_LANDMARKER is not None:
+        return _FACE_LANDMARKER
+    if not _HAS_MEDIAPIPE:
+        return None
+    try:
+        model_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "models", "face_landmarker.task"
+        )
+        if not os.path.exists(model_path):
+            alt_path = os.path.expanduser("~/.hermes/models/face_landmarker.task")
+            if os.path.exists(alt_path):
+                model_path = alt_path
+            else:
+                print("[WARN] face_landmarker.task not found, downloading...")
+                import urllib.request
+                os.makedirs(os.path.dirname(model_path), exist_ok=True)
+                url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+                urllib.request.urlretrieve(url, model_path)
+                print(f"[OK] Downloaded to {model_path}")
+        
+        options = FaceLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=model_path),
+            running_mode=RunningMode.IMAGE,
+            min_face_detection_confidence=0.5
+        )
+        _FACE_LANDMARKER = FaceLandmarker.create_from_options(options)
+        print("[OK] MediaPipe FaceLandmarker initialized")
+        return _FACE_LANDMARKER
+    except Exception as e:
+        print(f"[WARN] Failed to init MediaPipe: {e}")
+        return None
+
+
+def extract_face_features_mediapipe(img):
+    """使用MediaPipe FaceMesh提取478点面部特征"""
+    if not _HAS_MEDIAPIPE:
+        return None
+    
+    landmarker = _get_landmarker()
+    if landmarker is None:
+        return None
+    
+    try:
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        h, w = img.shape[:2]
+        mp_image = Image(image_format=ImageFormat.SRGB, data=rgb)
+        result = landmarker.detect(mp_image)
+        
+        if not result.face_landmarks:
+            return None
+        
+        mp_landmarks = result.face_landmarks[0]
+        features = FaceFeatures()
+        features.has_face = True
+        features.mediapipe_detected = True
+        
+        # Store all 478 landmarks
+        features.mp_landmarks = [(lm.x, lm.y, lm.z) for lm in mp_landmarks]
+        
+        # Extract face bounding box
+        xs = [lm.x for lm in mp_landmarks]
+        ys = [lm.y for lm in mp_landmarks]
+        features.face_w = max(xs) - min(xs)
+        features.face_h = max(ys) - min(ys)
+        features.face_aspect = features.face_w / features.face_h if features.face_h > 0 else 1.0
+        
+        # --- Named landmarks (MediaPipe indices) ---
+        key_indices = {
+            # Face contour
+            "forehead": 10,
+            "chin": 152,
+            "left_jaw": 172, "right_jaw": 397,
+            "left_jaw_low": 136, "right_jaw_low": 365,
+            "left_cheek": 234, "right_cheek": 454,
+            # Eyes
+            "left_eye_outer": 33, "left_eye_inner": 133,
+            "left_eye_top": 159, "left_eye_bottom": 145,
+            "right_eye_outer": 362, "right_eye_inner": 263,
+            "right_eye_top": 386, "right_eye_bottom": 374,
+            "left_iris": 468, "right_iris": 473,
+            # Nose
+            "nose_tip": 1, "nose_bridge": 168,
+            "nose_bottom": 2, "nose_left": 49, "nose_right": 279,
+            # Mouth
+            "mouth_left": 61, "mouth_right": 291,
+            "mouth_top": 13, "mouth_bottom": 14,
+            # Eyebrows
+            "left_brow_left": 46, "left_brow_right": 105,
+            "right_brow_left": 334, "right_brow_right": 276,
+        }
+        for name, idx in key_indices.items():
+            if idx < len(mp_landmarks):
+                lm = mp_landmarks[idx]
+                features.landmarks[name] = (lm.x, lm.y)
+        
+        # --- Compute derived measurements ---
+        le = mp_landmarks[33]; re = mp_landmarks[362]
+        features.eye_distance = re.x - le.x
+        features.eye_to_mouth = mp_landmarks[13].y - (le.y + re.y) / 2
+        
+        # --- Extract colors (same as before but with better regions) ---
+        features.skin_color = _extract_skin_color(img, mp_landmarks, w, h)
+        features.hair_color, features.hair_dark, features.hair_light = _extract_hair_color(img, mp_landmarks, w, h)
+        features.eye_color = _extract_eye_color(img, mp_landmarks, w, h)
+        features.lip_color = _extract_lip_color(img, mp_landmarks, w, h)
+        features.clothes_color, features.clothes_secondary = _extract_clothes_color(img, mp_landmarks, w, h)
+        
+        return features
+        
+    except Exception as e:
+        print(f"[WARN] MediaPipe extraction error: {e}")
+        return None
+
+
+def _extract_skin_color(img, landmarks, w, h):
+    """从脸颊区域提取皮肤颜色"""
+    try:
+        # Left cheek area
+        lc = landmarks[234]
+        rx, ry = int(lc.x * w), int(lc.y * h)
+        size = max(5, int(w * 0.02))
+        x1 = max(0, rx-size); x2 = min(w, rx+size)
+        y1 = max(0, ry-size); y2 = min(h, ry+size)
+        region = img[y1:y2, x1:x2]
+        if region.size > 0:
+            return tuple(np.median(region, axis=(0,1)).astype(int))
+    except: pass
+    return (200, 170, 150)
+
+
+def _extract_hair_color(img, landmarks, w, h):
+    """从头顶发际线区域提取头发颜色"""
+    try:
+        # Use forehead area and above
+        forehead = landmarks[10]
+        fy = int(forehead.y * h)
+        fx = int(forehead.x * w)
+        # Area above forehead
+        hair_top = max(0, fy - int(h * 0.08))
+        hair_bottom = max(0, fy - 2)
+        hair_left = max(0, fx - int(w * 0.10))
+        hair_right = min(w, fx + int(w * 0.10))
+        if hair_bottom > hair_top and hair_right > hair_left:
+            region = img[hair_top:hair_bottom, hair_left:hair_right]
+            if region.size > 0:
+                color = np.median(region, axis=(0,1)).astype(int)
+                gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+                median_b = np.median(gray)
+                _, dark_mask = cv2.threshold(gray, max(0, median_b-20), 255, cv2.THRESH_BINARY_INV)
+                _, light_mask = cv2.threshold(gray, min(255, median_b+30), 255, cv2.THRESH_BINARY)
+                dark_c = np.median(region[dark_mask>0], axis=0).astype(int) if np.sum(dark_mask>0)>10 else color
+                light_c = np.median(region[light_mask>0], axis=0).astype(int) if np.sum(light_mask>0)>10 else np.clip(color*1.3, 0, 255).astype(int)
+                return color, dark_c, light_c
+    except: pass
+    return (50, 40, 30), (40, 30, 20), (80, 70, 60)
+
+
+def _extract_eye_color(img, landmarks, w, h):
+    """从瞳孔位置提取眼睛颜色"""
+    try:
+        # Left iris area
+        iris = landmarks[468]
+        ix, iy = int(iris.x * w), int(iris.y * h)
+        size = max(3, int(w * 0.01))
+        x1 = max(0, ix-size); x2 = min(w, ix+size)
+        y1 = max(0, iy-size); y2 = min(h, iy+size)
+        region = img[y1:y2, x1:x2]
+        if region.size > 0:
+            gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+            _, dark = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY_INV)
+            if np.sum(dark>0) > 3:
+                return tuple(np.median(region[dark>0], axis=0).astype(int))
+    except: pass
+    return (30, 30, 30)
+
+
+def _extract_lip_color(img, landmarks, w, h):
+    """从嘴唇区域提取唇色"""
+    try:
+        mouth_top = landmarks[13]
+        mouth_bottom = landmarks[14]
+        mt = int(mouth_top.y * h)
+        mb = int(mouth_bottom.y * h)
+        ml = int(landmarks[61].x * w)
+        mr = int(landmarks[291].x * w)
+        if mb > mt and mr > ml:
+            region = img[mt:mb, ml:mr]
+            if region.size > 0:
+                b, g, r = cv2.split(region)
+                red_mask = (r > g + 10) & (r > b + 10)
+                if np.sum(red_mask) > 5:
+                    return tuple(np.median(region[red_mask], axis=0).astype(int))
+                return tuple(np.median(region, axis=(0,1)).astype(int))
+    except: pass
+    return (80, 80, 160)
+
+
+def _extract_clothes_color(img, landmarks, w, h):
+    """从下巴以下的身体区域提取衣服颜色"""
+    try:
+        chin = landmarks[152]
+        cy = int(chin.y * h) + 10
+        body_h = int((chin.y - landmarks[10].y) * h * 0.4)
+        cx = int(landmarks[152].x * w)
+        body_left = max(0, cx - int(w * 0.12))
+        body_right = min(w, cx + int(w * 0.12))
+        if cy + body_h < h and body_right > body_left:
+            region = img[cy:cy+body_h, body_left:body_right]
+            if region.size > 0:
+                pixels = region.reshape(-1, 3).astype(np.float32)
+                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+                _, labels, centers = cv2.kmeans(pixels, 3, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+                counts = np.bincount(labels.flatten())
+                valid = []
+                for i, c in enumerate(counts):
+                    color = centers[i].astype(int)
+                    brightness = np.mean(color)
+                    if 30 < brightness < 240:
+                        valid.append((c, color))
+                if valid:
+                    valid.sort(key=lambda x: -x[0])
+                    main = tuple(valid[0][1])
+                    sec = tuple(valid[1][1]) if len(valid) > 1 else main
+                    return main, sec
+    except: pass
+    return (80, 100, 180), (180, 180, 200)
+
+
+# ====== V3 Fallback (OpenCV Haar Cascade) ======
+def extract_face_features_v3(img):
+    """V3 fallback: use Haar Cascade (same as before)"""
+    if cv2 is None:
+        features = FaceFeatures()
+        features.has_face = False
+        return features
+    
     features = FaceFeatures()
-    img = cv2.imread(image_path)
-    if img is None:
-        print(f"无法读取图片: {image_path}")
-        return features
-
-    h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # 人脸检测
     face_cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml"
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     )
-    faces = face_cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80)
-    )
-
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80,80))
+    
     if len(faces) == 0:
-        print("未检测到人脸，使用默认特征")
         return features
-
-    x, y, fw, fh = max(faces, key=lambda r: r[2] * r[3])
-    features.face_rect = (x, y, fw, fh)
+    
+    x, y, fw, fh = max(faces, key=lambda r: r[2]*r[3])
     features.has_face = True
-    features.center_x = x + fw // 2
-    features.center_y = y + fh // 2
-
-    # --- 皮肤 ---
-    cheek_y = y + int(fh * 0.5)
-    cheek_region = img[cheek_y:cheek_y + int(fh * 0.2),
-                       x + int(fw * 0.2):x + int(fw * 0.8)]
-    if cheek_region.size > 0:
-        features.skin_color = np.median(cheek_region, axis=(0, 1)).astype(int)
-        features.skin_color = np.clip(features.skin_color * 1.15, 0, 255).astype(int)
-
-    # --- 头发（增强版） ---
-    if y > 10:
-        hair_y = max(0, y - int(fh * 0.35))
-        hair_end = max(0, y - 5)
-        hair_left = x + int(fw * 0.10)
-        hair_right = x + int(fw * 0.90)
-        if hair_end > hair_y and hair_right > hair_left:
-            hair_region = img[hair_y:hair_end, hair_left:hair_right]
-            if hair_region.size > 0:
-                features.hair_color = np.median(hair_region, axis=(0, 1)).astype(int)
-                # 提取头发主色的深浅层次（发根暗、发梢亮）
-                h_gray = cv2.cvtColor(hair_region, cv2.COLOR_BGR2GRAY)
-                h_median_brightness = np.median(h_gray)
-                features.hair_brightness = h_median_brightness
-                # 提取头发区域中较亮和较暗的部分作为辅助色
-                _, dark_mask = cv2.threshold(h_gray, max(0, h_median_brightness - 20), 255, cv2.THRESH_BINARY_INV)
-                if np.sum(dark_mask > 0) > 50:
-                    dark_px = hair_region[dark_mask > 0]
-                    features.hair_dark = np.median(dark_px, axis=0).astype(int)
-                else:
-                    features.hair_dark = features.hair_color
-                _, light_mask = cv2.threshold(h_gray, min(255, h_median_brightness + 30), 255, cv2.THRESH_BINARY)
-                if np.sum(light_mask > 0) > 50:
-                    light_px = hair_region[light_mask > 0]
-                    features.hair_light = np.median(light_px, axis=0).astype(int)
-                else:
-                    features.hair_light = np.clip(features.hair_color * 1.3, 0, 255).astype(int)
-                # 头发区域轮廓点（顶部弧线）
-                hair_top_y = hair_region.shape[0]
-                for py in range(hair_region.shape[0]-1, 0, -1):
-                    row = h_gray[py, :]
-                    if np.mean(row) < 150:
-                        hair_top_y = py
-                        break
-                features.hair_top_offset = hair_top_y  # 从头顶边界到头发顶部的偏移
-
-    # --- 瞳孔 ---
-    eye_y = y + int(fh * 0.28)
-    eye_region = img[eye_y:eye_y + int(fh * 0.15),
-                     x + int(fw * 0.2):x + int(fw * 0.8)]
-    if eye_region.size > 0:
-        eye_gray = cv2.cvtColor(eye_region, cv2.COLOR_BGR2GRAY)
-        _, dark_mask = cv2.threshold(eye_gray, 60, 255, cv2.THRESH_BINARY_INV)
-        if np.sum(dark_mask > 0) > 10:
-            dark_pixels = eye_region[dark_mask > 0]
-            features.eye_color = np.median(dark_pixels, axis=0).astype(int)
-        else:
-            features.eye_color = np.array([30, 30, 30])
-
-    # --- 嘴唇 ---
-    mouth_y = y + int(fh * 0.55)
-    mouth_region = img[mouth_y:mouth_y + int(fh * 0.15),
-                       x + int(fw * 0.25):x + int(fw * 0.75)]
-    if mouth_region.size > 0:
-        b, g, r = cv2.split(mouth_region)
-        red_mask = (r > g + 10) & (r > b + 10)
-        if np.sum(red_mask) > 10:
-            red_pixels = mouth_region[red_mask]
-            features.lip_color = np.median(red_pixels, axis=0).astype(int)
-        else:
-            features.lip_color = np.array([80, 80, 160])
-
-    # ===== 新增：衣服颜色提取 =====
-    # 策略：在人脸下方的身体区域（下巴以下）取dominant颜色
-    body_y = y + fh + int(fh * 0.05)
-    body_h = int(fh * 0.6)
-    body_left = max(0, x - int(fw * 0.2))
-    body_right = min(w, x + fw + int(fw * 0.2))
-
-    if body_y + body_h < h and body_right > body_left:
-        body_region = img[body_y:body_y + body_h,
-                         body_left:body_right]
-        if body_region.size > 0:
-            # 用K-means聚类提取主色和副色
-            pixels = body_region.reshape(-1, 3).astype(np.float32)
-            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-            _, labels, centers = cv2.kmeans(
-                pixels, 3, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
-            )
-            # 统计每个聚类的像素数
-            counts = np.bincount(labels.flatten())
-            # 忽略太暗或太亮的聚类（可能是背景）
-            valid = []
-            for i, c in enumerate(counts):
-                color = centers[i].astype(int)
-                brightness = np.mean(color)
-                if 30 < brightness < 240:  # 排除纯黑/纯白
-                    valid.append((c, color))
-            if valid:
-                valid.sort(key=lambda x: -x[0])
-                features.clothes_color = tuple(valid[0][1])
-                if len(valid) > 1:
-                    features.clothes_secondary = tuple(valid[1][1])
-                else:
-                    features.clothes_secondary = features.clothes_color
-
-    # 如果衣服颜色没提取到，用默认色
-    if np.sum(features.clothes_color) == 0:
-        # 基于肤色的搭配色
-        skin = features.skin_color
-        if np.mean(skin) > 150:
-            features.clothes_color = (80, 100, 180)   # 蓝色系
-            features.clothes_secondary = (180, 180, 200)
-        else:
-            features.clothes_color = (60, 80, 160)
-            features.clothes_secondary = (140, 140, 180)
-
-    # --- 脸型 ---
-    face_ratio = fw / fh
-    features.face_ratio = face_ratio
-    if face_ratio > 0.95:
-        features.face_shape = "round"
-    elif face_ratio > 0.85:
-        features.face_shape = "oval"
-    elif face_ratio > 0.75:
-        features.face_shape = "square"
-    else:
-        features.face_shape = "heart"
-
-    features.mouth_y = int(fh * 0.62)
+    features.face_w = fw
+    features.face_h = fh
+    features.face_aspect = fw/fh
+    
+    # Store basic landmarks for rendering
+    h_img, w_img = img.shape[:2]
+    features.landmarks["forehead"] = ((x+fw//2)/w_img, y/w_img)
+    features.landmarks["chin"] = ((x+fw//2)/w_img, (y+fh)/w_img)
+    features.landmarks["left_eye_outer"] = ((x+fw*0.25)/w_img, (y+fh*0.28)/w_img)
+    features.landmarks["right_eye_outer"] = ((x+fw*0.75)/w_img, (y+fh*0.28)/w_img)
+    features.landmarks["left_eye_inner"] = ((x+fw*0.38)/w_img, (y+fh*0.30)/w_img)
+    features.landmarks["right_eye_inner"] = ((x+fw*0.62)/w_img, (y+fh*0.30)/w_img)
+    features.landmarks["nose_tip"] = ((x+fw//2)/w_img, (y+fh*0.55)/w_img)
+    features.landmarks["mouth_left"] = ((x+fw*0.30)/w_img, (y+fh*0.62)/w_img)
+    features.landmarks["mouth_right"] = ((x+fw*0.70)/w_img, (y+fh*0.62)/w_img)
+    features.landmarks["mouth_top"] = ((x+fw//2)/w_img, (y+fh*0.60)/w_img)
+    features.landmarks["mouth_bottom"] = ((x+fw//2)/w_img, (y+fh*0.66)/w_img)
+    features.landmarks["nose_bridge"] = ((x+fw//2)/w_img, (y+fh*0.38)/w_img)
+    features.landmarks["left_jaw"] = ((x+fw*0.15)/w_img, (y+fh*0.55)/w_img)
+    features.landmarks["right_jaw"] = ((x+fw*0.85)/w_img, (y+fh*0.55)/w_img)
+    
+    # Colors (simple version)
+    features.skin_color = _extract_skin_color_simple(img, x, y, fw, fh)
+    features.hair_color, features.hair_dark, features.hair_light = _extract_hair_color_simple(img, x, y, fw, fh)
+    features.lip_color = _extract_lip_color_simple(img, x, y, fw, fh)
+    
     return features
 
+def _extract_skin_color_simple(img, x, y, fw, fh):
+    cheek = img[y+int(fh*0.5):y+int(fh*0.7), x+int(fw*0.2):x+int(fw*0.8)]
+    if cheek.size > 0:
+        return tuple(np.clip(np.median(cheek, axis=(0,1)).astype(int) * 1.15, 0, 255).astype(int))
+    return (200,170,150)
 
-# ====== Live2D风格角色渲染器 ======
+def _extract_hair_color_simple(img, x, y, fw, fh):
+    h_img, w_img = img.shape[:2]
+    hair_y = max(0, y - int(fh*0.35))
+    hair_end = max(0, y-5)
+    hair_left = max(0, x+int(fw*0.10))
+    hair_right = min(w_img, x+int(fw*0.90))
+    if hair_end > hair_y and hair_right > hair_left:
+        region = img[hair_y:hair_end, hair_left:hair_right]
+        if region.size > 0:
+            color = np.median(region, axis=(0,1)).astype(int)
+            return color, np.clip(color*0.8,0,255).astype(int), np.clip(color*1.3,0,255).astype(int)
+    return (50,40,30), (40,30,20), (80,70,60)
+
+def _extract_lip_color_simple(img, x, y, fw, fh):
+    mouth = img[y+int(fh*0.55):y+int(fh*0.70), x+int(fw*0.25):x+int(fw*0.75)]
+    if mouth.size > 0:
+        b,g,r = cv2.split(mouth)
+        red_mask = (r > g+10) & (r > b+10)
+        if np.sum(red_mask) > 10:
+            return tuple(np.median(mouth[red_mask], axis=0).astype(int))
+    return (80,80,160)
+
+
+# ====== 统一入口 ======
+def extract_face_features(photo_path):
+    """统一面部特征提取入口：MediaPipe优先，OpenCV回退"""
+    if cv2 is None:
+        print("[WARN] OpenCV not available, using default avatar")
+        return FaceFeatures()
+    
+    img = cv2.imread(photo_path)
+    if img is None:
+        print(f"[WARN] Cannot load image: {photo_path}")
+        return FaceFeatures()
+    
+    # Try MediaPipe first
+    features = extract_face_features_mediapipe(img)
+    if features is not None:
+        print(f"[OK] MediaPipe FaceMesh detected!")
+        return features
+    
+    # Fallback to OpenCV
+    print("[INFO] MediaPipe unavailable, using OpenCV Haar fallback")
+    return extract_face_features_v3(img)
+
+# ====== Rendering Constants ======
+# Canvas to head area mapping
+HEAD_MARGIN_X = 10   # left/right margin
+HEAD_MARGIN_Y = 5    # top margin
+HEAD_BOTTOM_MARGIN = 30  # bottom margin (for body)
 
 class QAvatarRenderer:
-    """
-    Q版小人 + Live2D风格动画渲染器
-    支持动画参数驱动，每帧可以传入不同的 Live2DParams
-    """
-
-    HEAD_RATIO = 0.65
-
+    """基于MediaPipe FaceMesh的V4版Q版渲染器"""
+    
     def __init__(self, features: FaceFeatures):
         self.features = features
-
-    def render(self, canvas_size=(150, 200), params: Live2DParams = None) -> QPixmap:
-        """
-        渲染当前帧
-        params: 动画参数（为None则用默认值）
-        """
+        self._last_params = Live2DParams()
+    
+    def render(self, canvas_size=(250, 250), params: Live2DParams = None) -> QPixmap:
         if params is None:
             params = Live2DParams()
-
+        self._last_params = params
+        
         cw, ch = canvas_size
+        head_w = cw - HEAD_MARGIN_X * 2
+        head_h = ch - HEAD_MARGIN_Y - HEAD_BOTTOM_MARGIN
+        head_x0 = HEAD_MARGIN_X
+        head_y0 = HEAD_MARGIN_Y
+        
         pix = QPixmap(cw, ch)
         pix.fill(Qt.transparent)
         painter = QPainter(pix)
         painter.setRenderHint(QPainter.Antialiasing)
-
-        # 呼吸 → 整体微缩放
-        breath_scale = 1.0 + params.breath_amplitude * math.sin(params.breath_phase)
+        
+        # ---- Breathing effect (global scale) ----
+        breath = 1.0 + params.breath_amplitude * math.sin(params.breath_phase)
         body_sway = 2.0 * math.sin(params.body_sway_phase)
-
-        total_height = int(ch * 0.90)
-        head_height = int(total_height * self.HEAD_RATIO)
-        body_height = total_height - head_height
-        head_size = min(cw - 20, head_height)
-        head_x = (cw - head_size) // 2
-        head_y = 5
-
-        body_top = head_y + head_size - 10
-        body_width = int(head_size * 0.55)
-        body_width = int(body_width * breath_scale)  # 呼吸影响宽度
-        body_height = min(body_height, ch - body_top - 5)
-
-        # ---- 身体 ----
-        self._draw_body(painter, QPoint(cw // 2 + int(body_sway), body_top),
-                       body_width, body_height, params)
-
-        # ---- 头部 ----
-        head_offset = int(2 * math.sin(params.breath_phase))  # 呼吸时头微微上下
-        self._draw_head(painter, QPoint(head_x, head_y + head_offset),
-                       head_size, params)
-
-        # ---- 头发（带飘动） ----
-        self._draw_hair(painter, QPoint(head_x, head_y + head_offset),
-                       head_size, params)
-
+        
+        # ---- Face-to-canvas mapping function ----
+        ft = self.features
+        if ft.mediapipe_detected:
+            # Compute face bbox from landmarks
+            xs = [ft.landmarks[n][0] for n in ["left_cheek","right_cheek","left_jaw","right_jaw","forehead","chin"]]
+            ys = [ft.landmarks[n][1] for n in ["forehead","chin","left_jaw","right_jaw","left_cheek","right_cheek"]]
+            face_min_x = min(xs)
+            face_max_x = max(xs)
+            face_min_y = min(ys)
+            face_max_y = max(ys)
+        else:
+            face_min_x = 0.25; face_max_x = 0.75
+            face_min_y = 0.15; face_max_y = 0.55
+        
+        face_w = max(0.001, face_max_x - face_min_x)
+        face_h = max(0.001, face_max_y - face_min_y)
+        
+        def map_x(lm_x):
+            return int(head_x0 + (lm_x - face_min_x) / face_w * head_w)
+        
+        def map_y(lm_y):
+            return int(head_y0 + (lm_y - face_min_y) / face_h * head_h)
+        
+        # Grab landmark if available
+        def lm(name):
+            return ft.landmarks.get(name, None)
+        
+        # ============ 1. DRAW BODY ============
+        body_top = map_y(0.47) if ft.mediapipe_detected else int(ch * 0.80)
+        self._draw_body(painter, cw, body_top, ch - body_top, ft, breath)
+        
+        # ============ 2. DRAW HEAD ============
+        self._draw_face_shape(painter, map_x, map_y, ft, lm, head_w, head_h)
+        
+        # ============ 3. DRAW HAIR (back layer) ============
+        self._draw_hair_back(painter, map_x, map_y, ft, lm, params, head_w)
+        
+        # ============ 4. DRAW EYEBROWS ============
+        self._draw_eyebrows(painter, map_x, map_y, ft, lm, params, head_w)
+        
+        # ============ 5. DRAW EYES ============
+        self._draw_eyes(painter, map_x, map_y, ft, lm, params, head_w)
+        
+        # ============ 6. DRAW NOSE ============
+        self._draw_nose(painter, map_x, map_y, ft, lm, head_w)
+        
+        # ============ 7. DRAW MOUTH ============
+        self._draw_mouth(painter, map_x, map_y, ft, lm, params)
+        
+        # ============ 8. DRAW BLUSH ============
+        self._draw_blush(painter, map_x, map_y, ft, lm, params)
+        
+        # ============ 9. DRAW HAIR (front) ============
+        self._draw_hair_front(painter, map_x, map_y, ft, lm, params, head_w)
+        
         painter.end()
         return pix
-
-    def _draw_head(self, painter, top_left, size, params):
-        """绘制头部（带Live2D风格表情）"""
-        x, y = top_left.x(), top_left.y()
-        skin = self.features.skin_color
-        face_w = size
-        face_h = int(size * 1.05)
-
-        path = QPainterPath()
-        path.addEllipse(x, y, face_w, face_h)
-
-        painter.setBrush(QBrush(QColor(int(skin[2]), int(skin[1]), int(skin[0]), 255)))
-        painter.setPen(QPen(QColor(int(skin[2] * 0.7), int(skin[1] * 0.7), int(skin[0] * 0.7)), 2))
-        painter.drawPath(path)
-
-        # 眉毛（受情绪影响）
-        self._draw_eyebrows(painter, x, y, face_w, face_h, params)
-
-        # 眼睛（受眨眼和情绪影响）
-        self._draw_eyes(painter, x, y, face_w, face_h, params)
-
-        # 嘴巴（受张嘴和情绪影响）
-        self._draw_mouth(painter, x, y, face_w, face_h, params)
-
-        # 腮红（开心时更红）
-        self._draw_blush(painter, x, y, face_w, face_h, params)
-
-    def _draw_eyes(self, painter, fx, fy, fw, fh, params):
-        """绘制Q版大眼睛（Live2D：眨眼+视线移动+情绪）"""
-        eye_color = self.features.eye_color
-        eye_y = fy + int(fh * 0.35)
-        eye_size_w = int(fw * 0.15)
-        eye_size_h = int(fh * 0.18)
-        eye_spacing = int(fw * 0.18)
+    
+    # ---- Face shape ----
+    def _draw_face_shape(self, painter, mx, my, ft, lm, hw, hh):
+        """Draw face contour based on landmarks"""
+        skin = ft.skin_color
+        skin_q = QColor(int(skin[2]), int(skin[1]), int(skin[0]))
         
-        # 眨眼控制
-        blink = params.eye_open  # 1=全开, 0=全闭
-        current_eye_h = max(1, int(eye_size_h * blink))
-        
-        # 视线方向
+        if ft.mediapipe_detected and lm("chin") and lm("left_jaw") and lm("right_jaw"):
+            # Use actual face contour: create QPainterPath from landmarks
+            chin = lm("chin"); ljaw = lm("left_jaw"); rjaw = lm("right_jaw")
+            forehead = lm("forehead"); lcheek = lm("left_cheek"); rcheek = lm("right_cheek")
+            
+            cx, cy = mx(chin[0]), my(chin[1])
+            lx, ly = mx(ljaw[0]), my(ljaw[1])
+            rx, ry = mx(rjaw[0]), my(rjaw[1])
+            fx, fy = mx(forehead[0]), my(forehead[1])
+            lcx, lcy = mx(lcheek[0]), my(lcheek[1])
+            rcx, rcy = mx(rcheek[0]), my(rcheek[1])
+            
+            # Q版化调整：让脸更圆润（压缩左右宽度？或保持）
+            # Build a smooth face contour
+            path = QPainterPath()
+            
+            # Start at forehead center
+            path.moveTo(fx, fy)
+            
+            # Left side: smooth curve through cheek to jaw to chin
+            path.cubicTo(
+                lcx, lcy,   # through left cheek
+                lx, ly,     # to left jaw
+                cx, cy      # to chin
+            )
+            
+            # chin -> right jaw -> right cheek -> forehead
+            path.cubicTo(
+                rx, ry,     # through right jaw
+                rcx, rcy,   # through right cheek
+                fx, fy      # back to forehead
+            )
+            
+            # Path auto-closed back to forehead
+            painter.setBrush(QBrush(skin_q))
+            painter.setPen(QPen(QColor(int(skin[2]*0.8), int(skin[1]*0.8), int(skin[0]*0.8)), 2))
+            painter.drawPath(path)
+        else:
+            # Fallback: ellipse
+            w = hw * 0.85
+            h = hh * 0.90
+            cx = mx(0.45)  # center-ish
+            cy = my(0.30)
+            r = QRect(cx - w//2, cy - h//2, w, h)
+            painter.setBrush(QBrush(skin_q))
+            painter.setPen(QPen(QColor(int(skin[2]*0.8), int(skin[1]*0.8), int(skin[0]*0.8)), 2))
+            painter.drawEllipse(r)
+    
+    # ---- Eyes ----
+    def _draw_eyes(self, painter, mx, my, ft, lm, params, hw):
+        eye_color = ft.eye_color
+        blink = params.eye_open
         look_x = int(params.eye_direction_x * 3)
         look_y = int(params.eye_direction_y * 2)
-
-        cx = fx + fw // 2
-        left_eye_cx = cx - eye_spacing - eye_size_w // 2
-        right_eye_cx = cx + eye_spacing
-
-        for base_cx in [left_eye_cx, right_eye_cx]:
-            if blink > 0.15:
-                # 眼白
-                painter.setBrush(QBrush(Qt.white))
-                painter.setPen(QPen(QColor(60, 60, 60), 2))
-                painter.drawEllipse(base_cx - eye_size_w // 2, eye_y - current_eye_h // 2,
-                                  eye_size_w, current_eye_h)
-
-                # 瞳孔
-                pupil_r = max(2, eye_size_w // 2 - 1)
-                pupil_r = int(pupil_r * (0.6 + blink * 0.4))
-                eye_cx = base_cx + look_x
-                eye_cy = eye_y + look_y
-                
-                painter.setBrush(QBrush(QColor(
-                    min(int(eye_color[2]) + 20, 255),
-                    min(int(eye_color[1]) + 20, 255),
-                    min(int(eye_color[0]) + 20, 255)
-                )))
-                painter.setPen(Qt.NoPen)
-                painter.drawEllipse(eye_cx - pupil_r + 1, eye_cy - pupil_r + 1,
-                                  pupil_r * 2, pupil_r * 2)
-
-                # 高光
-                highlight_r = max(1, pupil_r - 2)
-                painter.setBrush(QBrush(Qt.white))
-                painter.drawEllipse(eye_cx - highlight_r // 2 + look_x,
-                                  eye_cy - highlight_r // 2 - 1 + look_y,
-                                  highlight_r, highlight_r)
-                
-                # 第二高光
-                painter.setBrush(QBrush(QColor(255, 255, 255, 120)))
-                painter.drawEllipse(eye_cx + pupil_r // 4 + look_x,
-                                  eye_cy + pupil_r // 4 + look_y, 3, 3)
-            else:
-                # 闭眼（一条弧线）
-                painter.setPen(QPen(QColor(60, 40, 30), 2))
-                painter.drawArc(base_cx - eye_size_w // 2, eye_y - 2,
-                              eye_size_w, 8, 0, 180 * 16)
-
-    def _draw_eyebrows(self, painter, fx, fy, fw, fh, params):
-        """绘制眉毛（受情绪驱动）"""
-        brow_y = fy + int(fh * 0.28)
-        brow_w = int(fw * 0.12)
-        brow_spacing = int(fw * 0.18)
-        cx = fx + fw // 2
-
-        # 惊讶时眉毛抬高，生气时压低
-        raise_amount = params.brow_raise * 5 - params.anger * 3 + params.surprise * 6
-
-        painter.setPen(QPen(QColor(60, 40, 30), 2))
-        painter.setBrush(Qt.NoBrush)
-
-        for side, sign in [("left", -1), ("right", 1)]:
-            bx = cx + sign * brow_spacing
-            if side == "left":
-                bx -= brow_w
-            y_offset = int(raise_amount)
-            if params.anger > 0.5:
-                # 生气：眉尾下压
-                end_offset = 3 if side == "left" else -3
-            else:
-                end_offset = 0
-
-            path = QPainterPath()
-            path.moveTo(bx, brow_y + y_offset)
-            path.cubicTo(bx + brow_w // 3, brow_y + y_offset - 2,
-                        bx + brow_w * 2 // 3, brow_y + y_offset + 1 + end_offset,
-                        bx + brow_w + 2, brow_y + y_offset + 2 + end_offset)
-            painter.drawPath(path)
-
-    def _draw_mouth(self, painter, fx, fy, fw, fh, params):
-        """绘制嘴巴（Live2D：张嘴+微笑）"""
-        lip = self.features.lip_color
-        mouth_y = fy + int(fh * 0.62)
-        cx = fx + fw // 2
         
+        if ft.mediapipe_detected and lm("left_eye_outer"):
+            # ===== LANDMARK-BASED EYES =====
+            left_outer = lm("left_eye_outer"); left_inner = lm("left_eye_inner")
+            left_top = lm("left_eye_top"); left_bottom = lm("left_eye_bottom")
+            right_outer = lm("right_eye_outer"); right_inner = lm("right_eye_inner")
+            right_top = lm("right_eye_top"); right_bottom = lm("right_eye_bottom")
+            left_iris = lm("left_iris"); right_iris = lm("right_iris")
+            
+            for side in ["left", "right"]:
+                if side == "left":
+                    outer = left_outer; inner = left_inner
+                    top = left_top; bottom = left_bottom
+                    iris = left_iris
+                else:
+                    outer = right_outer; inner = right_inner
+                    top = right_top; bottom = right_bottom
+                    iris = right_iris
+                
+                ox, oy = mx(outer[0]), my(outer[1])
+                ix, iy = mx(inner[0]), my(inner[1])
+                tx, ty = mx(top[0]), my(top[1])
+                bx, by = mx(bottom[0]), my(bottom[1])
+                
+                eye_w = ix - ox
+                eye_h = max(4, by - ty)
+                cx = (ox + ix) // 2
+                cy = (ty + by) // 2
+                
+                # Q版放大眼睛
+                scale = 1.3
+                q_eye_w = int(eye_w * scale)
+                q_eye_h = max(4, int(eye_h * scale * blink))
+                
+                if blink > 0.15:
+                    # Eye white
+                    painter.setBrush(QBrush(Qt.white))
+                    painter.setPen(QPen(QColor(60, 60, 60), 2))
+                    painter.drawEllipse(cx - q_eye_w//2, cy - q_eye_h//2, q_eye_w, q_eye_h)
+                    
+                    # Iris
+                    iris_r = max(3, q_eye_w // 3)
+                    iris_r = int(iris_r * (0.6 + blink * 0.4))
+                    icx = cx + look_x
+                    icy = cy + look_y
+                    
+                    painter.setBrush(QBrush(QColor(
+                        min(int(eye_color[2])+20, 255),
+                        min(int(eye_color[1])+20, 255),
+                        min(int(eye_color[0])+20, 255)
+                    )))
+                    painter.setPen(Qt.NoPen)
+                    painter.drawEllipse(icx - iris_r, icy - iris_r, iris_r*2, iris_r*2)
+                    
+                    # Highlight
+                    hl_r = max(2, iris_r - 2)
+                    painter.setBrush(QBrush(Qt.white))
+                    painter.drawEllipse(icx - hl_r//2 + look_x, icy - hl_r//2 - 1 + look_y, hl_r, hl_r)
+                    
+                    # 2nd highlight
+                    painter.setBrush(QBrush(QColor(255, 255, 255, 120)))
+                    painter.drawEllipse(icx + iris_r//4 + look_x, icy + iris_r//4 + look_y, 3, 3)
+                else:
+                    # Closed eye
+                    painter.setPen(QPen(QColor(60, 40, 30), 2))
+                    painter.drawLine(cx - q_eye_w//2, cy, cx + q_eye_w//2, cy)
+        else:
+            # Fallback: simple eyes
+            self._draw_eyes_fallback(painter, mx, my, ft, params, hw)
+    
+    def _draw_eyes_fallback(self, painter, mx, my, ft, params, hw):
+        eye_color = ft.eye_color
+        blink = params.eye_open
+        eye_y = my(0.35)
+        eye_size_w = int(hw * 0.12)
+        eye_size_h = int(hw * 0.10)
+        cx = mx(0.45)
+        spacing = int(hw * 0.14)
+        
+        cur_h = max(1, int(eye_size_h * blink))
+        
+        for sign in [-1, 1]:
+            ecx = cx + sign * spacing
+            if blink > 0.15:
+                painter.setBrush(QBrush(Qt.white))
+                painter.setPen(QPen(QColor(60,60,60), 2))
+                painter.drawEllipse(ecx - eye_size_w//2, eye_y - cur_h//2, eye_size_w, cur_h)
+                pupil_r = max(2, eye_size_w//3)
+                eye_cx = ecx
+                painter.setBrush(QBrush(QColor(eye_color[2], eye_color[1], eye_color[0])))
+                painter.setPen(Qt.NoPen)
+                painter.drawEllipse(eye_cx - pupil_r, eye_y - pupil_r, pupil_r*2, pupil_r*2)
+            else:
+                painter.setPen(QPen(QColor(60,40,30), 2))
+                painter.drawLine(ecx - eye_size_w//2, eye_y, ecx + eye_size_w//2, eye_y)
+    
+    # ---- Eyebrows ----
+    def _draw_eyebrows(self, painter, mx, my, ft, lm, params, hw):
+        raise_amt = params.brow_raise * 5 - params.anger * 3 + params.surprise * 6
+        
+        if ft.mediapipe_detected and lm("left_brow_left"):
+            for side in ["left", "right"]:
+                if side == "left":
+                    bl = lm("left_brow_left"); br = lm("left_brow_right")
+                else:
+                    bl = lm("right_brow_left"); br = lm("right_brow_right")
+                
+                x1, y1 = mx(bl[0]), my(bl[1])
+                x2, y2 = mx(br[0]), my(br[1])
+                y_offset = int(raise_amt)
+                
+                painter.setPen(QPen(QColor(60, 40, 30), 2))
+                painter.setBrush(Qt.NoBrush)
+                path = QPainterPath()
+                path.moveTo(x1, y1 + y_offset)
+                path.cubicTo(
+                    x1 + (x2-x1)//3, y1 + y_offset - 2,
+                    x1 + (x2-x1)*2//3, y1 + y_offset + 1,
+                    x2, y2 + y_offset + 2
+                )
+                painter.drawPath(path)
+        else:
+            brow_y = my(0.32)
+            brow_w = int(hw * 0.10)
+            cx = mx(0.45)
+            spacing = int(hw * 0.14)
+            for sign in [-1, 1]:
+                bx = cx + sign * spacing
+                painter.setPen(QPen(QColor(60, 40, 30), 2))
+                painter.drawLine(bx - brow_w, brow_y, bx + brow_w, brow_y)
+    
+    # ---- Nose ----
+    def _draw_nose(self, painter, mx, my, ft, lm, hw):
+        if ft.mediapipe_detected and lm("nose_tip") and lm("nose_bridge"):
+            tip = lm("nose_tip")
+            bridge = lm("nose_bridge")
+            nleft = lm("nose_left")
+            nright = lm("nose_right")
+            
+            tx, ty = mx(tip[0]), my(tip[1])
+            bx, by = mx(bridge[0]), my(bridge[1])
+            lx, ly = mx(nleft[0]), my(nleft[1])
+            rx, ry = mx(nright[0]), my(nright[1])
+            
+            # Q版鼻子: small cute nose
+            painter.setPen(QPen(QColor(180, 150, 130), 2))
+            painter.setBrush(Qt.NoBrush)
+            
+            # Simple dot nose
+            navg_x = (lx + rx) // 2
+            navg_y = (ty + by) // 2 + 5
+            painter.drawEllipse(navg_x - 3, navg_y - 2, 6, 4)
+        else:
+            cx = mx(0.45)
+            ny = my(0.45)
+            painter.setPen(QPen(QColor(180, 150, 130), 2))
+            painter.drawLine(cx, ny - 5, cx, ny + 3)
+    
+    # ---- Mouth ----
+    def _draw_mouth(self, painter, mx, my, ft, lm, params):
+        lip = ft.lip_color
         mouth_open = params.mouth_open
         happiness = params.happiness
         surprise = params.surprise
-
-        lip_r = int(lip[2])
-        lip_g = int(lip[1])
-        lip_b = int(lip[0])
-
-        if mouth_open > 0.1 or surprise > 0.5:
-            # 张嘴（惊讶/说话/打哈欠）
-            open_amount = max(mouth_open, surprise * 0.8)
-            mouth_w = int(fw * 0.22)
-            mouth_h = int(fw * 0.18 * open_amount)
-            
-            painter.setBrush(QBrush(QColor(
-                min(lip_r + 30, 255), min(lip_g + 20, 255), min(lip_b + 20, 255)
-            )))
-            painter.setPen(QPen(QColor(lip_r, lip_g, lip_b), 1))
-            painter.drawEllipse(cx - mouth_w // 2, mouth_y - mouth_h // 2,
-                              mouth_w, mouth_h)
-            
-            # 口腔内部（深色）
-            if mouth_h > 4:
-                inner_h = mouth_h - 4
-                painter.setBrush(QBrush(QColor(60, 20, 20)))
-                painter.setPen(Qt.NoPen)
-                painter.drawEllipse(cx - mouth_w // 2 + 2,
-                                  mouth_y - inner_h // 2 + 1,
-                                  mouth_w - 4, inner_h - 2)
-        else:
-            # 微笑（弧度受开心程度影响）
-            smile_arc = int(60 + happiness * 60)  # 60°~120°
-            painter.setPen(QPen(QColor(lip_r, lip_g, lip_b), 2))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawArc(cx - int(fw * 0.1), mouth_y - 3,
-                          int(fw * 0.2), int(fw * 0.1),
-                          0, smile_arc * 16)
-
-    def _draw_blush(self, painter, fx, fy, fw, fh, params):
-        """绘制腮红（开心时加深）"""
-        blush_y = fy + int(fh * 0.52)
-        blush_r = int(fw * 0.06)
-        cx = fx + fw // 2
-        spacing = int(fw * 0.25)
         
-        # 开心/害羞时腮红更明显
+        if ft.mediapipe_detected and lm("mouth_left"):
+            left = lm("mouth_left"); right = lm("mouth_right")
+            top = lm("mouth_top"); bottom = lm("mouth_bottom")
+            
+            lx, ly = mx(left[0]), my(left[1])
+            rx, ry = mx(right[0]), my(right[1])
+            tx, ty = mx(top[0]), my(top[1])
+            bx, by = mx(bottom[0]), my(bottom[1])
+            
+            cx = (lx + rx) // 2
+            mouth_w = rx - lx
+            mouth_h = max(3, by - ty)
+            
+            # Q版放大嘴
+            scale = 1.2
+            qw = int(mouth_w * scale)
+            qh = max(3, int(mouth_h * scale))
+            
+            if mouth_open > 0.1 or surprise > 0.5:
+                open_amt = max(mouth_open, surprise * 0.8)
+                mh = int(qh * open_amt * 3)
+                
+                painter.setBrush(QBrush(QColor(
+                    min(int(lip[2])+30, 255), min(int(lip[1])+20, 255), min(int(lip[0])+20, 255)
+                )))
+                painter.setPen(QPen(QColor(int(lip[2]), int(lip[1]), int(lip[0])), 1))
+                painter.drawEllipse(cx - qw//2, by - mh//2, qw, mh)
+                
+                if mh > 4:
+                    painter.setBrush(QBrush(QColor(60, 20, 20)))
+                    painter.setPen(Qt.NoPen)
+                    painter.drawEllipse(cx - qw//2 + 2, by - mh//2 + 1, qw - 4, mh - 2)
+            else:
+                # Smile arc
+                smile_arc = int(60 + happiness * 60)
+                painter.setPen(QPen(QColor(int(lip[2]), int(lip[1]), int(lip[0])), 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawArc(cx - qw//2, by - qh,
+                              qw, qh * 2,
+                              0, smile_arc * 16)
+        else:
+            # Fallback
+            lip_r, lip_g, lip_b = int(lip[2]), int(lip[1]), int(lip[0])
+            cx = mx(0.45)
+            mw = int(0.12 * mx(0.45))
+            
+            if mouth_open > 0.1:
+                mh = int(mw * 0.6 * mouth_open * 3)
+                painter.setBrush(QBrush(QColor(lip_r+30, lip_g+20, lip_b+20)))
+                painter.setPen(QPen(QColor(lip_r, lip_g, lip_b), 1))
+                painter.drawEllipse(cx - mw//2, mx(0.55) - mh//2, mw, mh)
+            else:
+                smile = int(60 + happiness * 60)
+                painter.setPen(QPen(QColor(lip_r, lip_g, lip_b), 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawArc(cx - mw, my(0.55), mw*2, int(mw*0.5), 0, smile*16)
+    
+    # ---- Blush ----
+    def _draw_blush(self, painter, mx, my, ft, lm, params):
         intensity = min(80, int(60 + params.happiness * 40))
         
-        painter.setBrush(QBrush(QColor(255, 150, 150, intensity)))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(cx - spacing - blush_r, blush_y - blush_r // 2,
-                          blush_r * 2, blush_r)
-        painter.drawEllipse(cx + spacing - blush_r, blush_y - blush_r // 2,
-                          blush_r * 2, blush_r)
-
-    def _draw_hair(self, painter, top_left, size, params):
-        """绘制头发（增强版：多层次+渐变+飘动）"""
-        x, y = top_left.x(), top_left.y()
-        feat = self.features
-        hair = feat.hair_color
-        if not feat.has_face:
-            hair = np.array([50, 40, 30])
-
+        if ft.mediapipe_detected and lm("left_cheek") and lm("right_cheek"):
+            lc = lm("left_cheek"); rc = lm("right_cheek")
+            chin = lm("chin"); forehead = lm("forehead")
+            
+            hh = my(chin[1]) - my(forehead[1])
+            blush_r = max(3, int(hh * 0.06))
+            
+            painter.setBrush(QBrush(QColor(255, 150, 150, intensity)))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(mx(lc[0]) - blush_r, my(lc[1]) - blush_r//2, blush_r*2, blush_r)
+            painter.drawEllipse(mx(rc[0]) - blush_r, my(rc[1]) - blush_r//2, blush_r*2, blush_r)
+        else:
+            cx = mx(0.45)
+            blush_y = my(0.45)
+            blush_r = int(0.05 * mx(0.45))
+            spacing = int(0.14 * mx(0.45))
+            painter.setBrush(QBrush(QColor(255, 150, 150, intensity)))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(cx - spacing - blush_r, blush_y - blush_r//2, blush_r*2, blush_r)
+            painter.drawEllipse(cx + spacing - blush_r, blush_y - blush_r//2, blush_r*2, blush_r)
+    
+    # ---- Hair back layer ----
+    def _draw_hair_back(self, painter, mx, my, ft, lm, params, hw):
+        hair = ft.hair_color
+        hair_dark = ft.hair_dark
         hair_color = QColor(int(hair[2]), int(hair[1]), int(hair[0]))
-        hair_dark_c = QColor(
-            min(int(feat.hair_dark[2]), 255),
-            min(int(feat.hair_dark[1]), 255),
-            min(int(feat.hair_dark[0]), 255)
-        )
-        hair_light_c = QColor(
-            min(int(feat.hair_light[2]), 255),
-            min(int(feat.hair_light[1]), 255),
-            min(int(feat.hair_light[0]), 255)
-        )
+        hair_dark_c = QColor(int(hair_dark[2]), int(hair_dark[1]), int(hair_dark[0]))
         wave = params.hair_wave_phase
-
-        # 主头发区域（圆润的帽子形状，带发丝感）
-        main_path = QPainterPath()
-        main_path.moveTo(x + int(size * 0.02), y + int(size * 0.15))
-        sway = 5 * math.sin(wave)
-        # 头顶弧线
-        main_path.cubicTo(
-            x + int(size * 0.15) + int(sway*0.5), y - int(size * 0.08),
-            x + int(size * 0.55) + int(sway), y - int(size * 0.12),
-            x + int(size * 0.85) + int(sway*0.5), y - int(size * 0.08),
-        )
-        # 右缘下至侧脸
-        main_path.cubicTo(
-            x + size - int(size * 0.02) + int(sway*0.3), y + int(size * 0.05),
-            x + size + int(sway*0.2), y + int(size * 0.15),
-            x + size + int(sway*0.3), y + int(size * 0.35)
-        )
-        # 底部弧线回左侧
-        main_path.cubicTo(
-            x + size + int(sway*0.1), y + int(size * 0.45),
-            x + int(sway*0.1), y + int(size * 0.45),
-            x + int(sway*0.3), y + int(size * 0.35)
-        )
-        main_path.cubicTo(
-            x + int(sway*0.2), y + int(size * 0.15),
-            x + int(size * 0.02) + int(sway*0.3), y + int(size * 0.05),
-            x + int(size * 0.02), y + int(size * 0.15)
-        )
-        # 绘制主头发填充（带深色阴影）
-        painter.setBrush(QBrush(hair_dark_c))
-        painter.setPen(Qt.NoPen)
-        painter.drawPath(main_path)
-
-        # 中层头发（主色，略微缩小叠加在深色上，制造层次感）
-        mid_path = QPainterPath()
-        mid_path.moveTo(x + int(size * 0.05), y + int(size * 0.17))
-        mid_path.cubicTo(
-            x + int(size * 0.18), y - int(size * 0.05),
-            x + int(size * 0.55) + int(sway), y - int(size * 0.09),
-            x + int(size * 0.82), y - int(size * 0.05),
-        )
-        mid_path.cubicTo(
-            x + size - int(size * 0.05), y + int(size * 0.05),
-            x + size - 2 + int(sway*0.2), y + int(size * 0.15),
-            x + size - 2 + int(sway*0.3), y + int(size * 0.30)
-        )
-        mid_path.cubicTo(
-            x + size - 2 + int(sway*0.1), y + int(size * 0.38),
-            x + 2 + int(sway*0.1), y + int(size * 0.38),
-            x + 2 + int(sway*0.3), y + int(size * 0.30)
-        )
-        mid_path.cubicTo(
-            x + 2 + int(sway*0.2), y + int(size * 0.15),
-            x + int(size * 0.05), y + int(size * 0.05),
-            x + int(size * 0.05), y + int(size * 0.17)
-        )
-        painter.setBrush(QBrush(hair_color))
-        painter.drawPath(mid_path)
-
-        # 亮部发丝线（高光）
-        painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(hair_light_c, 2))
-        strand_count = 8
-        for i in range(strand_count):
-            px = x + int(size * (0.12 + i * 0.09))
-            sway_i = 3 * math.sin(wave + i * 0.8)
-            start_y = y + int(size * 0.02) + int(sway_i)
-            end_y = y + int(size * (0.10 + (i % 3) * 0.03))
-            painter.drawLine(px + sway_i, start_y, px + sway_i, end_y)
-
-        # 刘海（多根渐变）
-        painter.setPen(QPen(hair_color, 4))
-        painter.setBrush(Qt.NoBrush)
-        bangs = 7
-        for i in range(bangs):
-            bx = x + int(size * (0.10 + i * 0.11))
-            by = y + int(size * 0.10)
-            sway_b = 3 * math.sin(wave + i * 0.7)
-            end_h = y + int(size * (0.18 + (i % 3) * 0.06))
-            # 刘海线条颜色渐变（从主色到亮色）
-            ratio = i / max(1, bangs - 1)
-            r = int(hair[2] * (1 - ratio) + feat.hair_light[2] * ratio)
-            g = int(hair[1] * (1 - ratio) + feat.hair_light[1] * ratio)
-            b = int(hair[0] * (1 - ratio) + feat.hair_light[0] * ratio)
-            painter.setPen(QPen(QColor(min(r,255), min(g,255), min(b,255)), 3 - (i % 2)))
-            painter.drawLine(bx + sway_b, by, bx + sway_b, end_h)
-
-        # 两侧头发（多缕叠加）
-        side_sway = 4 * math.sin(wave + 1.5)
-        # 左侧：两缕
-        for lyr in range(2):
-            opacity = 180 if lyr == 0 else 120
-            thickness = 5 if lyr == 0 else 3
-            lx = x + lyr * 3
-            painter.setPen(QPen(QColor(hair[2], hair[1], hair[0], opacity), thickness))
-            painter.drawLine(lx + side_sway, y + int(size * 0.15),
-                          lx + int(side_sway * 0.7), y + int(size * 0.55))
-        # 右侧：两缕
-        for lyr in range(2):
-            opacity = 180 if lyr == 0 else 120
-            thickness = 5 if lyr == 0 else 3
-            rx = x + size - lyr * 3
-            painter.setPen(QPen(QColor(hair[2], hair[1], hair[0], opacity), thickness))
-            painter.drawLine(rx - side_sway, y + int(size * 0.15),
-                          rx - int(side_sway * 0.7), y + int(size * 0.55))
-
-    def _draw_body(self, painter, center, width, height, params):
-        """绘制Q版小身体（带衣服颜色和呼吸微动）"""
-        cx, cy = center.x(), center.y()
         
-        # 从特征获取衣服颜色
-        clothes = self.features.clothes_color
-        clothes2 = self.features.clothes_secondary
-
-        main_color = QColor(
-            min(int(clothes[2]), 255),
-            min(int(clothes[1]), 255),
-            min(int(clothes[0]), 255)
-        )
-        accent_color = QColor(
-            min(int(clothes2[2]), 255),
-            min(int(clothes2[1]), 255),
-            min(int(clothes2[0]), 255)
-        )
-
-        # 衣服主体
-        body_rect = QRect(cx - width // 2, cy, width, height)
-        painter.setBrush(QBrush(main_color))
-        painter.setPen(QPen(accent_color, 1))
-        painter.drawRoundedRect(body_rect, 10, 10)
-
-        # 衣领配色（副色）
-        collar_h = int(height * 0.12)
-        collar_rect = QRect(cx - width // 2, cy, width, collar_h)
-        painter.setBrush(QBrush(accent_color))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(collar_rect, 8, 8)
-
-        # 衣领V字装饰
-        painter.setPen(QPen(QColor(255, 255, 255, 100), 2))
-        painter.drawLine(cx - width // 4, cy + int(height * 0.12),
-                        cx, cy + int(height * 0.25))
-        painter.drawLine(cx + width // 4, cy + int(height * 0.12),
-                        cx, cy + int(height * 0.25))
-
-        # 手臂（两边 + 带呼吸微动）
-        arm_color = QColor(
-            min(int(clothes[2] * 0.8), 255),
-            min(int(clothes[1] * 0.8), 255),
-            min(int(clothes[0] * 0.8), 255)
-        )
-        arm_sway = int(2 * math.sin(params.body_sway_phase))
+        if ft.mediapipe_detected and lm("forehead"):
+            forehead = lm("forehead")
+            chin = lm("chin"); ljaw = lm("left_jaw"); rjaw = lm("right_jaw")
+            
+            fx, fy = mx(forehead[0]), my(forehead[1])
+            cx, cy = mx(chin[0]), my(chin[1])
+            hh = cy - fy
+            hw2 = hw * 0.5
+            
+            sway = int(5 * math.sin(wave))
+            
+            # Back hair volume (compact, just behind the head)
+            path = QPainterPath()
+            hair_r = int(hw2 * 0.70)
+            path.addEllipse(fx - hair_r, fy - int(hh * 0.20), hair_r * 2, int(hh * 0.55))
+            painter.setBrush(QBrush(hair_dark_c))
+            painter.setPen(Qt.NoPen)
+            painter.drawPath(path)
+        else:
+            # Fallback hair
+            pass
+    
+    # ---- Hair front layer ----
+    def _draw_hair_front(self, painter, mx, my, ft, lm, params, hw):
+        hair = ft.hair_color
+        hair_light = ft.hair_light
+        hair_color = QColor(int(hair[2]), int(hair[1]), int(hair[0]))
+        hair_light_c = QColor(int(hair_light[2]), int(hair_light[1]), int(hair_light[0]))
+        wave = params.hair_wave_phase
         
-        painter.setBrush(QBrush(arm_color))
-        painter.setPen(Qt.NoPen)
+        if ft.mediapipe_detected and lm("forehead"):
+            forehead = lm("forehead")
+            left_brow_l = lm("left_brow_left"); right_brow_r = lm("right_brow_right")
+            
+            fx, fy = mx(forehead[0]), my(forehead[1])
+            chin = lm("chin"); cx, cy = mx(chin[0]), my(chin[1])
+            hh = cy - fy
+            hw2 = int(hw * 0.50)
+            sway = int(5 * math.sin(wave))
+            head_top_y = fy - int(hh * 0.15)
+            
+            # Main hair (top only, doesn't cover face)
+            path = QPainterPath()
+            hair_r = int(hw2 * 0.65)
+            path.addEllipse(fx - hair_r, head_top_y, hair_r * 2, int(hh * 0.32))
+            
+            # Fill with main hair color
+            painter.setBrush(QBrush(hair_color))
+            painter.setPen(Qt.NoPen)
+            painter.drawPath(path)
+            
+            # Fringe (bangs)
+            brow_y = int((lm("left_brow_left")[1] + lm("left_brow_right")[1]) / 2)
+            brow_canvas_y = my(brow_y)
+            bangs_start_y = fy
+            bangs_count = 8
+            
+            for i in range(bangs_count):
+                px = fx - hw2 + int(i * hw2 * 2 / bangs_count) + sway
+                py = bangs_start_y
+                end_y = brow_canvas_y + int(hh * 0.08 * (i % 3) / 2)
+                ratio = i / max(1, bangs_count - 1)
+                r = int(hair[2] * (1-ratio) + hair_light[2] * ratio)
+                g = int(hair[1] * (1-ratio) + hair_light[1] * ratio)
+                b = int(hair[0] * (1-ratio) + hair_light[0] * ratio)
+                
+                painter.setPen(QPen(QColor(min(r,255), min(g,255), min(b,255)), 3 - (i % 2)))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawLine(px, py, px, end_y)
+        else:
+            # Fallback: simple hair cap
+            fx = mx(0.45); fy = my(0.20)
+            r = mx(0.75); hair_r = (r - fx) * 1.2
+            painter.setBrush(QBrush(hair_color))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(fx - hair_r, fy - int(hair_r * 1.2), int(hair_r * 2), int(hair_r * 1.5))
+    
+    # ---- Body ----
+    def _draw_body(self, painter, cw, top, height, ft, breath):
+        clothes = ft.clothes_color
+        clothes2 = ft.clothes_secondary
         
-        # 左手
-        painter.drawRoundedRect(
-            cx - width // 2 - 8 + arm_sway, cy + int(height * 0.15),
-            10, int(height * 0.25), 4, 4
+        main_c = QColor(int(clothes[2]), int(clothes[1]), int(clothes[0]))
+        acc_c = QColor(int(clothes2[2]), int(clothes2[1]), int(clothes2[0]))
+        
+        cx = cw // 2
+        bw = int(cw * 0.30 * breath)
+        
+        # Small body (just shoulders/neck)
+        path = QPainterPath()
+        neck_w = max(8, bw // 2)
+        path.moveTo(cx, top)
+        path.cubicTo(
+            cx - neck_w, top + height * 0.2,
+            cx - bw, top + height * 0.4,
+            cx - bw, top + height
         )
-        # 右手
-        painter.drawRoundedRect(
-            cx + width // 2 - 2 - arm_sway, cy + int(height * 0.15),
-            10, int(height * 0.25), 4, 4
+        path.lineTo(cx + bw, top + height)
+        path.cubicTo(
+            cx + bw, top + height * 0.4,
+            cx + neck_w, top + height * 0.2,
+            cx, top
         )
-
-        # 小脚
-        foot_color = accent_color
-        painter.setBrush(QBrush(foot_color))
-        painter.drawRoundedRect(
-            cx - width // 4 - 5, cy + height - 4,
-            width // 4, 6, 3, 3
+        
+        painter.setBrush(QBrush(main_c))
+        painter.setPen(QPen(acc_c, 1))
+        painter.drawPath(path)
+        
+        # Collar
+        collar_h = max(3, height // 4)
+        painter.setBrush(QBrush(acc_c))
+        painter.setPen(Qt.NoPen)
+        col_path = QPainterPath()
+        col_path.moveTo(cx - int(bw * 0.5), top)
+        col_path.cubicTo(
+            cx - int(bw * 0.3), top + collar_h,
+            cx + int(bw * 0.3), top + collar_h,
+            cx + int(bw * 0.5), top
         )
-        painter.drawRoundedRect(
-            cx + width // 4 - 5, cy + height - 4,
-            width // 4, 6, 3, 3
-        )
+        painter.drawPath(col_path)
 
 
 # ====== Live2D风格动画帧生成器 ======
-
 class Live2DAnimator:
-    """
-    Live2D风格动画控制器
-    自动管理呼吸、眨眼、头发飘动参数
-    每一帧调用 update() 更新参数，返回当前帧的 QPixmap
-    """
-    
-    def __init__(self, renderer: QAvatarRenderer, canvas_size=(150, 200)):
+    def __init__(self, renderer: QAvatarRenderer, canvas_size=(250, 250)):
         self.renderer = renderer
         self.canvas_size = canvas_size
         self.params = Live2DParams()
         self.frame_count = 0
-        
-        # 随机眨眼间隔（3~5秒）
         self.blink_counter = 0
-        self.next_blink = random.randint(150, 300)
-        
-        # 当前情绪
-        self.mood = "neutral"  # neutral / happy / surprised / eating
-        
-    def update(self) -> QPixmap:
-        """更新动画参数，返回当前帧"""
+        self.next_blink = random.randint(90, 200)  # ~3-7 seconds at 30fps
+    
+    def update(self):
+        """更新动画参数并渲染当前帧"""
         self.frame_count += 1
-        f = self.frame_count
+        p = self.params
         
-        # --- 呼吸（持续循环） ---
-        self.params.breath_phase = f * 0.05
-        self.params.body_sway_phase = f * 0.02
+        # 呼吸
+        p.breath_phase += 0.05
+        p.body_sway_phase += 0.02
         
-        # --- 头发飘动（持续循环） ---
-        self.params.hair_wave_phase = f * 0.06
+        # 头发飘动
+        p.hair_wave_phase += 0.08
         
-        # --- 眨眼（间歇） ---
+        # 眨眼
         self.blink_counter += 1
         if self.blink_counter >= self.next_blink:
-            self.blink_counter = 0
-            self.next_blink = random.randint(150, 300)
+            # Start blinking sequence
+            blink_frames = 6  # 6 frames to close and open
+            if self.blink_counter - self.next_blink < blink_frames:
+                t = (self.blink_counter - self.next_blink) / blink_frames
+                if t < 0.5:
+                    p.eye_open = 1.0 - (t * 2) * 0.9  # closing
+                else:
+                    p.eye_open = (t - 0.5) * 2 * 0.9  # opening
+            else:
+                p.eye_open = 1.0
+                self.blink_counter = 0
+                self.next_blink = random.randint(90, 200)
         
-        if self.blink_counter < 3:
-            self.params.eye_open = max(0.1, 1.0 - self.blink_counter * 0.3)
-        elif self.blink_counter < 6:
-            self.params.eye_open = min(1.0, 0.1 + (self.blink_counter - 3) * 0.3)
-        else:
-            self.params.eye_open = 1.0
+        # 情绪渐变（缓慢回归默认）
+        p.happiness += (0.5 - p.happiness) * 0.01
+        p.surprise *= 0.98
+        p.anger *= 0.98
         
-        # --- 嘴部（根据情绪） ---
-        if self.mood == "surprised":
-            self.params.mouth_open = 0.6 + 0.2 * math.sin(f * 0.1)
-            self.params.brow_raise = 0.8
-            self.params.happiness = 0.3
-        elif self.mood == "happy":
-            self.params.mouth_open = 0.3 + 0.15 * math.sin(f * 0.08)
-            self.params.brow_raise = 0.3
-            self.params.happiness = 0.9
-            self.params.surprise = 0.0
-        elif self.mood == "eating":
-            self.params.mouth_open = 0.5 + 0.4 * math.sin(f * 0.2)
-            self.params.brow_raise = 0.0
-            self.params.happiness = 0.7
-        else:
-            # neutral: 自然呼吸微动
-            self.params.mouth_open = 0.05 + 0.03 * math.sin(f * 0.04)
-            self.params.brow_raise = 0.0
-            self.params.happiness = 0.5
-            self.params.surprise = 0.0
-        
-        # --- 视线（偶尔扫视） ---
-        self.params.eye_direction_x = 0.3 * math.sin(f * 0.015)
-        self.params.eye_direction_y = 0.1 * math.sin(f * 0.02)
-        
-        return self.renderer.render(self.canvas_size, self.params)
+        return self.renderer.render(self.canvas_size, p)
     
-    def set_mood(self, mood):
+    def set_mood(self, mood="normal"):
         """设置情绪状态"""
-        if mood in ("neutral", "happy", "surprised", "eating"):
-            self.mood = mood
-    
-    def get_params_snapshot(self) -> dict:
-        """获取当前参数快照（用于保存/恢复）"""
-        return {
-            "eye_open": self.params.eye_open,
-            "mouth_open": self.params.mouth_open,
-            "happiness": self.params.happiness,
-            "mood": self.mood,
-        }
+        p = self.params
+        mood = mood.lower()
+        if mood == "happy":
+            p.happiness = 1.0; p.surprise = 0.0; p.anger = 0.0
+        elif mood == "angry":
+            p.happiness = 0.1; p.surprise = 0.0; p.anger = 0.8
+        elif mood == "surprised":
+            p.happiness = 0.3; p.surprise = 1.0; p.anger = 0.0
+        elif mood == "sad":
+            p.happiness = 0.0; p.surprise = 0.0; p.anger = 0.0
 
 
-# ====== 便捷接口 ======
-
-def create_qavatar(input_path, output_path, canvas_size=(150, 200)):
-    """从照片创建Q版角色静态图"""
-    features = extract_face_features(input_path)
-    renderer = QAvatarRenderer(features)
-    pixmap = renderer.render(canvas_size)
-    pixmap.save(output_path)
-    print(f"Q版角色已保存: {output_path}")
-    return pixmap
-
-
-def create_qavatar_pixmap(image_path, canvas_size=(150, 200)):
-    """从照片创建Q版角色，返回QPixmap"""
-    features = extract_face_features(image_path)
-    renderer = QAvatarRenderer(features)
-    return renderer.render(canvas_size)
-
-
-# 测试入口
-if __name__ == "__main__":
+# ====== 用于测试的独立运行入口 ======
+def test_render():
+    """测试渲染输出（保存到文件）"""
     import sys
-    import random
     from PyQt5.QtWidgets import QApplication
     
-    if len(sys.argv) > 1:
-        app = QApplication(sys.argv)
-        input_path = sys.argv[1]
-        output_path = sys.argv[2] if len(sys.argv) > 2 else "qavatar_output.png"
-        
-        print(f"输入: {input_path}")
-        print(f"输出: {output_path}")
-        
-        # 特征提取
-        features = extract_face_features(input_path)
-        print(f"检测到人脸: {features.has_face}")
-        print(f"脸型: {features.face_shape}")
-        print(f"肤色: {features.skin_color}")
-        print(f"发色: {features.hair_color}")
-        print(f"衣服色: {features.clothes_color}")
-        print(f"衣服副色: {features.clothes_secondary}")
-        
-        # 渲染静态图
-        pix = create_qavatar(input_path, output_path)
-        print(f"完成! 尺寸: {pix.width()}x{pix.height()}")
+    app = QApplication(sys.argv)
+    
+    # Try to find a photo
+    photo_path = "assets/images/jiejie.jpg"
+    if not os.path.exists(photo_path):
+        import glob
+        photos = glob.glob("assets/images/*.jpg") + glob.glob("assets/images/*.png")
+        if photos:
+            photo_path = photos[0]
+        else:
+            print("No photo found")
+            return
+    
+    print(f"[TEST] Extracting features from: {photo_path}")
+    features = extract_face_features(photo_path)
+    
+    if not features or not features.has_face:
+        print("[TEST] No face detected, using defaults")
+        features = FaceFeatures()
+    
+    print(f"[TEST] Creating renderer (detected={'MediaPipe' if features.mediapipe_detected else 'OpenCV'})")
+    renderer = QAvatarRenderer(features)
+    animator = Live2DAnimator(renderer, canvas_size=(250, 250))
+    
+    # Render a few frames
+    for i in range(10):
+        pix = animator.update()
+        if i == 0:
+            pix.save("/tmp/avatar_v4_test.png")
+            print(f"[TEST] Saved frame to /tmp/avatar_v4_test.png ({pix.width()}x{pix.height()})")
+    
+    print("[TEST] Done!")
+
+if __name__ == "__main__":
+    test_render()
