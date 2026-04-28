@@ -171,9 +171,14 @@ class DesktopPet(QWidget):
             fr=self.animator.update()
         if fr:
             pixmap = fr
+            # Scale character to 70% so it fits better in window
             if pixmap.size().width() != self.pet_w or pixmap.size().height() != self.pet_h:
                 pixmap = pixmap.scaled(self.pet_w, self.pet_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            # Draw at bottom so jump has room above
+            # Shrink to 70% for better fit
+            pw = max(1, int(self.pet_w * 0.7))
+            ph = max(1, int(self.pet_h * 0.7))
+            pixmap = pixmap.scaled(pw, ph, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            # Draw at bottom center
             draw_y = self.window_h - pixmap.height()
             draw_x = (self.pet_w - pixmap.width()) // 2
             p.drawPixmap(draw_x, draw_y, pixmap)
