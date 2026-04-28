@@ -93,7 +93,7 @@ class FrameGenerator:
         # Character occupies bottom 70% of canvas.
         # Shoulder: at about 70% down the character area = h*0.30 + h*0.70*0.35 = h*0.55
         char_top = int(h * 0.30)  # where character starts (top after 70% shrink)
-        shoulder_y = int(char_top + h * 0.70 * 0.30)  # 30% down within char area
+        shoulder_y = int(char_top + h * 0.70 * 0.55)  # 55% down within char area (lower body)
         shoulder_x = int(w * 0.72)
         for angle in arm_angles:
             pix = self._copy_base()
@@ -103,7 +103,7 @@ class FrameGenerator:
                 rad = angle * 3.14159 / 180
                 arm_len = int(w * 0.10)  # arm length proportional to width
                 hand_x = shoulder_x + int(arm_len * np.cos(rad))
-                hand_y = shoulder_y - int(arm_len * np.sin(rad))
+                hand_y = shoulder_y - int(arm_len * np.abs(np.sin(rad))*0.5)
                 hand_size = max(5, int(w * 0.048))
                 line_width = max(2, int(w * 0.015))
                 painter.setPen(QPen(QColor(100, 150, 255), line_width))
@@ -147,7 +147,7 @@ class FrameGenerator:
                 # Mouth: 50% down within the character area = h*0.30 + h*0.70*0.50 = h*0.65
                 char_top = int(h * 0.30)
                 char_height = int(h * 0.70)
-                mouth_y = int(char_top + char_height * 0.50)
+                mouth_y = int(char_top + char_height * 0.60)
                 mouth_x = w // 2
 
                 # Food size: 20% of canvas width (50% bigger than before)
@@ -186,10 +186,10 @@ class FrameGenerator:
                     line_width = max(2, int(w * 0.015))
 
                     painter.setPen(QPen(QColor(100, 150, 255), line_width))
-                    painter.drawLine(0, int(h * 0.80), left_hx, hand_y)
+                    painter.drawLine(0, int(h * 0.90), left_hx, hand_y)
                     painter.setBrush(QBrush(QColor(255, 200, 150)))
                     painter.drawEllipse(left_hx - hand_size//2, hand_y - hand_size//2, hand_size, hand_size)
-                    painter.drawLine(w, int(h * 0.80), right_hx, hand_y)
+                    painter.drawLine(w, int(h * 0.90), right_hx, hand_y)
                     painter.drawEllipse(right_hx - hand_size//2, hand_y - hand_size//2, hand_size, hand_size)
 
                 elif t < 0.75:
@@ -211,10 +211,10 @@ class FrameGenerator:
                     line_width = max(2, int(w * 0.015))
 
                     painter.setPen(QPen(QColor(100, 150, 255), line_width))
-                    painter.drawLine(0, int(h * 0.80), left_hx, hy)
+                    painter.drawLine(0, int(h * 0.90), left_hx, hy)
                     painter.setBrush(QBrush(QColor(255, 200, 150)))
                     painter.drawEllipse(left_hx - hand_size//2, hy - hand_size//2, hand_size, hand_size)
-                    painter.drawLine(w, int(h * 0.80), right_hx, hy)
+                    painter.drawLine(w, int(h * 0.90), right_hx, hy)
                     painter.drawEllipse(right_hx - hand_size//2, hy - hand_size//2, hand_size, hand_size)
 
                 else:
@@ -234,12 +234,12 @@ class FrameGenerator:
 
                     lx = mouth_x - int(w * 0.12) + wave
                     painter.setPen(QPen(QColor(100, 150, 255), line_width))
-                    painter.drawLine(0, int(h * 0.80), lx, hy)
+                    painter.drawLine(0, int(h * 0.90), lx, hy)
                     painter.setBrush(QBrush(QColor(255, 200, 150)))
                     painter.drawEllipse(lx - hand_size//2, hy - hand_size//2, hand_size, hand_size)
 
                     rx = mouth_x + int(w * 0.12) - wave
-                    painter.drawLine(w, int(h * 0.80), rx, hy)
+                    painter.drawLine(w, int(h * 0.90), rx, hy)
                     painter.drawEllipse(rx - hand_size//2, hy - hand_size//2, hand_size, hand_size)
 
                 painter.end()
