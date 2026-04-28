@@ -8,7 +8,7 @@ Q版小人生成器 + Live2D风格动画引擎
   4. 支持动画帧序列生成（直接给AnimationEngine使用）
 """
 
-import os
+import os, random
 import cv2
 import numpy as np
 from PyQt5.QtCore import Qt, QPoint, QRect
