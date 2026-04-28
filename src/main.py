@@ -3,7 +3,7 @@
 Desktop Pet - 桌面宠物
 Using QAvatarRenderer + AnimationEngine
 """
-import sys, os, json, random, math
+import sys, os, json, random, math, shutil, traceback
 from datetime import datetime
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import Qt, QTimer, QPoint
@@ -124,7 +124,7 @@ class DesktopPet(QWidget):
     def change_photo(self):
         fp,_=QFileDialog.getOpenFileName(self,"Select Photo","","Images (*.jpg *.jpeg *.png *.bmp *.gif)")
         if fp:
-            import shutil; shutil.copy2(fp,PHOTO_CACHE)
+            shutil.copy2(fp,PHOTO_CACHE)
             self._create_from_photo(PHOTO_CACHE)
             self.config["user_photo"]=fp; self.config["use_default_avatar"]=False; self.save_config()
             QMessageBox.information(self,"OK","Photo changed!")
