@@ -135,7 +135,8 @@ class DesktopPet(QWidget):
     def set_pet_size(self, idx):
         if 0<=idx<len(self.size_options):
             self.pet_size_index=idx; self.pet_w=self.size_options[idx]; self.pet_h=self.size_options[idx]
-            self.resize(self.pet_w,self.pet_h)
+            self.window_h = self.pet_h + JUMP_OFFSET
+            self.resize(self.pet_w, self.window_h)
             if self.renderer:
                 pix=self.renderer.render((self.pet_w,self.pet_h))
                 self.frame_generator.set_base_image(pix); self.frame_generator.set_pet_size(self.pet_w,self.pet_h)

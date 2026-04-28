@@ -102,17 +102,25 @@ class FrameGenerator:
         frames = []
         w, h = self.pet_size
         food_name = getattr(self, '_feed_food_type', '').lower()
-        for i in range(51):
+        total = 51
+        for i in range(total):
             pix = self._copy_base()
             if pix:
                 painter = QPainter(pix)
                 painter.setRenderHint(QPainter.Antialiasing)
-                progress = i / 50
-                food_y = -40 + min(i * 2, 60)
-                if food_y < 80 and progress < 0.5:
-                    food_x = w // 2 - 20
+                t = i / total
+
+                food_x = w // 2 - 20
+                mouth_x = w // 2 - 5
+                mouth_y = h // 2 + 10
+
+                if t < 0.35:
+                    # FOOD FALLING FROM SKY
+                    food_start_y = -60
+                    food_end_y = mouth_y - 30
+                    food_y = food_start_y + (food_end_y - food_start_y) * (t / 0.35)
+
                     if 'burger' in food_name and 'fried' not in food_name and 'chicken' not in food_name:
-                        # Burger style
                         painter.setBrush(QBrush(QColor(220, 160, 80)))
                         painter.setPen(Qt.NoPen)
                         painter.drawEllipse(food_x, int(food_y), 40, 12)
@@ -120,35 +128,130 @@ class FrameGenerator:
                         painter.drawRect(food_x + 3, int(food_y + 10), 34, 10)
                         painter.setBrush(QBrush(QColor(220, 160, 80)))
                         painter.drawEllipse(food_x, int(food_y + 18), 40, 12)
-                        # Lettuce line
                         painter.setPen(QPen(QColor(100, 200, 80), 2))
                         painter.drawLine(food_x + 10, int(food_y + 15), food_x + 30, int(food_y + 15))
                     elif 'fried' in food_name or 'chicken' in food_name:
-                        # Drumstick
                         painter.setBrush(QBrush(QColor(200, 130, 50)))
                         painter.setPen(Qt.NoPen)
                         painter.drawEllipse(food_x + 4, int(food_y + 2), 32, 18)
                         painter.setBrush(QBrush(QColor(220, 160, 100)))
                         painter.drawRoundedRect(food_x + 8, int(food_y), 16, 22, 4, 4)
-                        # Bone line
                         painter.setPen(QPen(QColor(180, 140, 100), 2))
                         painter.drawLine(food_x + 30, int(food_y + 10), food_x + 38, int(food_y + 14))
                     else:
-                        # Noodles bowl
                         painter.setBrush(QBrush(QColor(180, 140, 100)))
                         painter.setPen(Qt.NoPen)
                         painter.drawRoundedRect(food_x, int(food_y), 40, 28, 8, 8)
                         painter.setBrush(QBrush(QColor(230, 190, 80)))
                         painter.drawEllipse(food_x + 4, int(food_y + 4), 32, 16)
-                        # Noodle lines
                         painter.setPen(QPen(QColor(160, 120, 70), 2))
                         painter.drawLine(food_x + 8, int(food_y + 10), food_x + 32, int(food_y + 10))
                         painter.drawLine(food_x + 12, int(food_y + 14), food_x + 28, int(food_y + 14))
                         painter.setPen(QPen(QColor(200, 50, 50), 2))
                         painter.drawLine(food_x + 10, int(food_y + 18), food_x + 30, int(food_y + 18))
+
+                    # Hand reaching up to catch
+                    hand_reach = t / 0.35
+                    arm_y = h - 20 - int(30 * hand_reach)
+                    painter.setPen(QPen(QColor(100, 150, 255), 4))
+                    painter.drawLine(w // 2, h, w // 2, arm_y + 5)
+                    painter.setBrush(QBrush(QColor(255, 200, 150)))
+                    painter.drawEllipse(w // 2 - 6, arm_y, 12, 12)
+
+                elif t < 0.65:
+                    # HAND CATCHES FOOD + BRINGS TO MOUTH
+                    phase_t = (t - 0.35) / 0.30
+                    food_y = mouth_y - 30
+
+                    if 'burger' in food_name and 'fried' not in food_name and 'chicken' not in food_name:
+                        painter.setBrush(QBrush(QColor(220, 160, 80)))
+                        painter.setPen(Qt.NoPen)
+                        painter.drawEllipse(food_x, int(food_y), 40, 12)
+                        painter.setBrush(QBrush(QColor(140, 80, 30)))
+                        painter.drawRect(food_x + 3, int(food_y + 10), 34, 10)
+                        painter.setBrush(QBrush(QColor(220, 160, 80)))
+                        painter.drawEllipse(food_x, int(food_y + 18), 40, 12)
+                        painter.setPen(QPen(QColor(100, 200, 80), 2))
+                        painter.drawLine(food_x + 10, int(food_y + 15), food_x + 30, int(food_y + 15))
+                    elif 'fried' in food_name or 'chicken' in food_name:
+                        painter.setBrush(QBrush(QColor(200, 130, 50)))
+                        painter.setPen(Qt.NoPen)
+                        painter.drawEllipse(food_x + 4, int(food_y + 2), 32, 18)
+                        painter.setBrush(QBrush(QColor(220, 160, 100)))
+                        painter.drawRoundedRect(food_x + 8, int(food_y), 16, 22, 4, 4)
+                        painter.setPen(QPen(QColor(180, 140, 100), 2))
+                        painter.drawLine(food_x + 30, int(food_y + 10), food_x + 38, int(food_y + 14))
+                    else:
+                        painter.setBrush(QBrush(QColor(180, 140, 100)))
+                        painter.setPen(Qt.NoPen)
+                        painter.drawRoundedRect(food_x, int(food_y), 40, 28, 8, 8)
+                        painter.setBrush(QBrush(QColor(230, 190, 80)))
+                        painter.drawEllipse(food_x + 4, int(food_y + 4), 32, 16)
+                        painter.setPen(QPen(QColor(160, 120, 70), 2))
+                        painter.drawLine(food_x + 8, int(food_y + 10), food_x + 32, int(food_y + 10))
+                        painter.drawLine(food_x + 12, int(food_y + 14), food_x + 28, int(food_y + 14))
+                        painter.setPen(QPen(QColor(200, 50, 50), 2))
+                        painter.drawLine(food_x + 10, int(food_y + 18), food_x + 30, int(food_y + 18))
+
+                    # Hand closes on food then brings up
+                    if phase_t < 0.5:
+                        hand_offset = int(20 * (1 - phase_t * 2))
+                    else:
+                        hand_offset = int(30 * (phase_t - 0.5) * 2)
+                    arm_y = mouth_y - 20 - hand_offset
+                    painter.setPen(QPen(QColor(100, 150, 255), 4))
+                    painter.drawLine(w // 2, h, w // 2, arm_y)
+                    painter.setBrush(QBrush(QColor(255, 200, 150)))
+                    painter.drawEllipse(w // 2 - 6, arm_y - 5, 12, 12)
+
+                else:
+                    # EATING + CHEWING
+                    phase_t = (t - 0.65) / 0.35
+
+                    # Food shrinks
+                    food_scale = 1.0 - phase_t * 0.7
+                    if food_scale > 0.3:
+                        food_y = mouth_y - 30 + int(5 * phase_t)
+                        fs = food_scale
+                        fw = int(40 * fs)
+                        fx = w // 2 - fw // 2
+
+                        if 'burger' in food_name and 'fried' not in food_name and 'chicken' not in food_name:
+                            painter.setBrush(QBrush(QColor(220, 160, 80)))
+                            painter.setPen(Qt.NoPen)
+                            painter.drawEllipse(fx, int(food_y), fw, int(12 * fs))
+                            painter.setBrush(QBrush(QColor(140, 80, 30)))
+                            painter.drawRect(fx + 3, int(food_y + int(10 * fs)), fw - 6, int(10 * fs))
+                            painter.setBrush(QBrush(QColor(220, 160, 80)))
+                            painter.drawEllipse(fx, int(food_y + int(18 * fs)), fw, int(12 * fs))
+                        elif 'fried' in food_name or 'chicken' in food_name:
+                            painter.setBrush(QBrush(QColor(200, 130, 50)))
+                            painter.setPen(Qt.NoPen)
+                            painter.drawEllipse(fx + 4, int(food_y + 2), int(fw * 0.7), int(18 * fs))
+                        else:
+                            painter.setBrush(QBrush(QColor(180, 140, 100)))
+                            painter.setPen(Qt.NoPen)
+                            painter.drawRoundedRect(fx, int(food_y), fw, int(28 * fs), 8, 8)
+
+                    # Hand waving
+                    hand_wave = int(10 * np.sin(phase_t * 4 * np.pi))
+                    arm_y = mouth_y - 50 + hand_wave
+                    painter.setPen(QPen(QColor(100, 150, 255), 4))
+                    painter.drawLine(w // 2, h, w // 2, arm_y)
+                    painter.setBrush(QBrush(QColor(255, 200, 150)))
+                    painter.drawEllipse(w // 2 - 6, arm_y - 5, 12, 12)
+
+                    # Chewing motion
+                    if phase_t < 0.8:
+                        chew = int(3 * np.sin(phase_t * 8 * np.pi))
+                        painter.setBrush(QBrush(QColor(255, 220, 200)))
+                        painter.setPen(Qt.NoPen)
+                        painter.drawEllipse(w // 2 - 8 + chew, mouth_y - 5, 16, 10)
+
                 painter.end()
             frames.append(pix)
         self._cache[AnimationType.FEED] = frames
+
     def prerender_jump(self):
         frames = []
         w, h = self.pet_size
