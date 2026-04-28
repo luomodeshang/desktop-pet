@@ -112,11 +112,22 @@ desktop-pet/
 
 ## 📜 版本历史
 
-| 版本 | 亮点 |
-|------|------|
-| **v3.0** | Q版小人生成 + Live2D风格动画 + 衣服颜色匹配 |
-| v2.0 | 照片卡通化 + 完整交互逻辑 |
-| v1.0 | 基础桌面宠物框架 |
+| 版本 | 亮点 | 详细说明 |
+|------|------|----------|
+| **v3.0.11** | 修复初始渲染 + 托盘图标 + 默认照片 | 修复打开时人物不显示（base_pixmap在初始化时为空）；托盘图标改为使用Q版头像；默认使用assets/images/jiejie.jpg |
+| **v3.0.10** | 修复 random 导入错误 | qavatar_generator.py 缺失 import random 导致 Windows 下 NameError |
+| **v3.0.9** | 修复 Windows 模块导入路径 | python src/main.py 运行时 from src.qavatar_generator 找不到模块；添加 sys.path 修正 |
+| **v3.0.8** | import shutil 移至模块顶部 | change_photo() 方法内部的 import shutil 移到文件顶部 |
+| **v3.0.7** | 修复JUMP/WALK动画 + 增强头像渲染 | JUMP 弹跳 60px + 压缩拉伸动画；WALK 左右摆动 + 上下颠簸；头发增强为渐变刘海 + 侧发双缕 |
+| **v3.0.6** | 修复默认尺寸 + 喂食闪退 | 默认尺寸改为250px；右键触发改用 QAction 独立方法；头发重写三层贝塞尔+渐变刘海 |
+| **v3.0.5** | 修复JUMP/WALK帧渲染 | 为_ensure_cache添加 JUMP/WALK prerender，防止 pet 消失 |
+| **v3.0.4** | FrameGenerator init 顺序修复 | engine/frame_generator 在_init_avatar前创建，修复 AttributeError |
+| **v3.0.3** | 增强头发渲染 | 增加头发细节，左右侧发，暗/亮两层上色 |
+| **v3.0.2** | 修复喂食动画时间 | QTimer 从 1500ms 延长到 2500ms |
+| **v3.0.1** | 默认尺寸 250px | pet_size_index 从 1 改为 3 |
+| **v3.0** | Q版小人生成 + Live2D风格动画 + 衣服颜色匹配 | 从照片自动生成 Q 版角色，呼吸眨眼头发飘动，情绪表情系统 |
+| v2.0 | 照片卡通化 + 完整交互逻辑 | OpenCV 滤镜 + 卡通化 + 喂食/动作/状态切换 |
+| v1.0 | 基础桌面宠物框架 | 窗口拖拽 + 基础动画 + 托盘菜单 |
 
 ---
 

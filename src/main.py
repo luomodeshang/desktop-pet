@@ -86,6 +86,8 @@ class DesktopPet(QWidget):
         self.animator = Live2DAnimator(self.renderer, canvas_size=(self.pet_w, self.pet_h))
         pix = self.renderer.render((self.pet_w, self.pet_h))
         self.frame_generator.set_base_image(pix)
+        self.frame_generator._cache.clear()
+        self.engine._ensure_cache(AnimationType.NONE)
 
     def _create_default_avatar(self):
         from src.qavatar_generator import FaceFeatures
@@ -99,12 +101,20 @@ class DesktopPet(QWidget):
         self.animator = Live2DAnimator(self.renderer, canvas_size=(self.pet_w, self.pet_h))
         pix = self.renderer.render((self.pet_w, self.pet_h))
         self.frame_generator.set_base_image(pix)
+        self.frame_generator._cache.clear()
+        self.engine._ensure_cache(AnimationType.NONE)
 
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
+        # Use QAvatar as tray icon (resize render output to 32x32)
         ip = QPixmap(32,32); ip.fill(Qt.transparent)
-        p = QPainter(ip); p.setBrush(QBrush(QColor(100,150,255,200)))
-        p.setPen(Qt.NoPen); p.drawEllipse(2,2,28,28); p.end()
+        if self.renderer:
+            rp = self.renderer.render((32,32))
+            p = QPainter(ip); p.drawPixmap(0,0,rp); p.end()
+        else:
+            p = QPainter(ip)
+            p.setBrush(QBrush(QColor(100,150,200,180)))
+            p.setPen(Qt.NoPen); p.drawEllipse(2,2,28,28); p.end()
         self.tray_icon.setIcon(QIcon(ip)); self.tray_icon.show()
         tm = QMenu()
         sm = tm.addMenu("Size")
