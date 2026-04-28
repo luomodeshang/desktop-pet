@@ -94,14 +94,14 @@ class FrameGenerator:
         # Shoulder: at about 70% down the character area = h*0.30 + h*0.70*0.35 = h*0.55
         char_top = int(h * 0.30)  # where character starts (top after 70% shrink)
         shoulder_y = int(char_top + h * 0.70 * 0.55)  # 55% down within char area (lower body)
-        shoulder_x = int(w * 0.72)
+        shoulder_x = int(w * 0.68)
         for angle in arm_angles:
             pix = self._copy_base()
             if pix:
                 painter = QPainter(pix)
                 painter.setRenderHint(QPainter.Antialiasing)
                 rad = angle * 3.14159 / 180
-                arm_len = int(w * 0.10)  # arm length proportional to width
+                arm_len = int(w * 0.07)  # arm length proportional to width
                 hand_x = shoulder_x + int(arm_len * np.cos(rad))
                 hand_y = shoulder_y - int(arm_len * np.abs(np.sin(rad))*0.5)
                 hand_size = max(5, int(w * 0.048))
@@ -179,7 +179,7 @@ class FrameGenerator:
                         painter.drawPixmap(mouth_x - fp.width() // 2, int(food_y), fp)
 
                     hand_y = food_y + food_h // 2
-                    max_reach = int(w * 0.30)
+                    max_reach = int(w * 0.22)
                     left_hx = int(max_reach * (1 - phase_t))
                     right_hx = w - left_hx
                     hand_size = max(5, int(w * 0.048))
@@ -203,7 +203,7 @@ class FrameGenerator:
                         fp = food_pixmap.scaled(fw, int(fw * 0.75), Qt.KeepAspectRatio, Qt.SmoothTransformation)
                         painter.drawPixmap(mouth_x - fp.width() // 2, int(food_y), fp)
 
-                    hand_spread = int(w * 0.15 * (1 - phase_t))
+                    hand_spread = int(w * 0.12 * (1 - phase_t))
                     left_hx = mouth_x - hand_spread
                     right_hx = mouth_x + hand_spread
                     hy = food_y + max(6, int(fw * 0.3))
@@ -230,15 +230,15 @@ class FrameGenerator:
                     wave = int(w * 0.06 * np.sin(phase_t * 6 * np.pi))
                     hand_size = max(5, int(w * 0.048))
                     line_width = max(2, int(w * 0.015))
-                    hy = mouth_y - int(h * 0.20)
+                    hy = mouth_y - int(h * 0.18)
 
-                    lx = mouth_x - int(w * 0.12) + wave
+                    lx = mouth_x - int(w * 0.10) + wave
                     painter.setPen(QPen(QColor(100, 150, 255), line_width))
                     painter.drawLine(0, int(h * 0.90), lx, hy)
                     painter.setBrush(QBrush(QColor(255, 200, 150)))
                     painter.drawEllipse(lx - hand_size//2, hy - hand_size//2, hand_size, hand_size)
 
-                    rx = mouth_x + int(w * 0.12) - wave
+                    rx = mouth_x + int(w * 0.10) - wave
                     painter.drawLine(w, int(h * 0.90), rx, hy)
                     painter.drawEllipse(rx - hand_size//2, hy - hand_size//2, hand_size, hand_size)
 
