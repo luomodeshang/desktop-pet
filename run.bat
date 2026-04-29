@@ -29,15 +29,10 @@ if errorlevel 1 (
     pip install Pillow
 )
 
-:: Check & fix OpenCV (MediaPipe needs compatible version)
-python -c "import cv2; import mediapipe" >nul 2>&1
-if errorlevel 1 (
-    echo [INFO] Fixing OpenCV/MediaPipe compatibility...
-    pip uninstall opencv-contrib-python opencv-python opencv-python-headless -y >nul 2>&1
-    pip install --user opencv-python==4.9.0.80
-)
+:: Fix OpenCV
+python -c "import cv2" >nul 2>&1
+if errorlevel 1 goto opencv_fix
 
-:: Install MediaPipe if missing
 python -c "import mediapipe" >nul 2>&1
 if errorlevel 1 goto install_mp
 
@@ -54,16 +49,27 @@ if errorlevel 1 (
 )
 goto end
 
-:install_mp
-if exist "deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl" goto install_local
-echo [INFO] Installing MediaPipe from PyPI...
-pip install --user mediapipe
+:opencv_fix
+echo [INFO] Setting up OpenCV...
+pip uninstall opencv-contrib-python opencv-python -y >nul 2>&1
+pip install --user opencv-python==4.9.0.80
 echo.
+python -c "import mediapipe" >nul 2>&1
+if errorlevel 1 goto install_mp
 goto run_pet
 
-:install_local
-echo [INFO] Installing MediaPipe from local package...
-pip install --user "deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl"
+:install_mp
+:: Detect Python version and pick the right whl
+python -c "import sys; v=sys.version_info; print(f'cp{v.major}{v.minor}')" > "%temp%\pyver.txt"
+set /p PYVER=<"%temp%\pyver.txt"
+
+if exist "deps\mediapipe-0.10.21-%PYVER%-win_amd64.whl" (
+    echo [INFO] Installing MediaPipe for Python %PYVER%...
+    pip install --user "deps\mediapipe-0.10.21-%PYVER%-win_amd64.whl"
+) else (
+    echo [INFO] No local MediaPipe for Python %PYVER%, trying PyPI...
+    pip install --user mediapipe
+)
 echo.
 goto run_pet
 

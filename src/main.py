@@ -31,7 +31,7 @@ class DesktopPet(QWidget):
     def __init__(self, photo_path=None):
         super().__init__()
         self.photo_path = photo_path
-        self.pet_size_index = 1
+        self.pet_size_index = 2
         self.size_options = [100, 150, 200, 250, 300]
         self.pet_w = self.size_options[self.pet_size_index]
         self.pet_h = self.size_options[self.pet_size_index]
@@ -252,7 +252,7 @@ class DesktopPet(QWidget):
                 if self.animator: self.animator.params.eye_open=1.0; self.animator.params.happiness=0.5
 
     def load_config(self):
-        d={"pet_size_index":1,"position":[100,100],"last_state":"standing","food_history":[],"user_photo":None,"use_default_avatar":True}
+        d={"pet_size_index":2,"position":[100,100],"last_state":"standing","food_history":[],"user_photo":None,"use_default_avatar":True}
         if os.path.exists(CONFIG_PATH):
             try:
                 with open(CONFIG_PATH,"r",encoding="utf-8") as f:

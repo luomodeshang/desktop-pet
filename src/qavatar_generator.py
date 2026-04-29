@@ -61,7 +61,9 @@ except ImportError:
         
         # Try local whl first (for users without internet access)
         _script_dir = os.path.dirname(os.path.abspath(__file__))
-        local_whl = os.path.join(os.path.dirname(_script_dir), "deps", "mediapipe-0.10.21-cp39-cp39-win_amd64.whl")
+        # Build whl filename based on Python version
+        _py_ver = f"cp{sys.version_info.major}{sys.version_info.minor}"
+        local_whl = os.path.join(os.path.dirname(_script_dir), "deps", f"mediapipe-0.10.21-{_py_ver}-win_amd64.whl")
         if os.path.exists(local_whl):
             print("[INFO] Found local package, installing...")
             # Use mirror for dependency resolution (Chinese network friendly)
