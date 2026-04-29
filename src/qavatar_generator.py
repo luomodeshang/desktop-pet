@@ -24,6 +24,30 @@ try:
 except ImportError:
     cv2 = None
 
+# Fix OpenCV version conflict (opencv-python vs opencv-contrib-python)
+if cv2 is not None:
+    try:
+        import importlib
+        importlib.import_module('cv2.gapi')
+    except (AttributeError, ImportError):
+        print("[WARN] OpenCV version conflict detected. Auto-fixing...")
+        import subprocess, sys
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "uninstall", "opencv-contrib-python", "-y"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "opencv-python==4.9.0.80", "--quiet"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            importlib.invalidate_caches()
+            import cv2
+            print("[OK] OpenCV fixed!")
+        except Exception:
+            print("[WARN] Could not auto-fix OpenCV. Using fallback.")
+            cv2 = None
+
 try:
     from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions, RunningMode
     from mediapipe.tasks.python import BaseOptions

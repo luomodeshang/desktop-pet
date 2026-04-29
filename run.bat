@@ -3,7 +3,7 @@ chcp 65001 >nul
 title Desktop Pet
 
 echo ========================================
-echo     Desktop Pet
+echo     Desktop Pet v4.0.1
 echo ========================================
 echo.
 
@@ -29,12 +29,15 @@ if errorlevel 1 (
     pip install Pillow
 )
 
-python -c "import cv2" >nul 2>&1
+:: Check & fix OpenCV (MediaPipe needs compatible version)
+python -c "import cv2; import mediapipe" >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Installing opencv-python...
-    pip install opencv-python
+    echo [INFO] Fixing OpenCV/MediaPipe compatibility...
+    pip uninstall opencv-contrib-python opencv-python opencv-python-headless -y >nul 2>&1
+    pip install opencv-python==4.9.0.80
 )
 
+:: Install MediaPipe if missing
 python -c "import mediapipe" >nul 2>&1
 if errorlevel 1 goto install_mp
 
