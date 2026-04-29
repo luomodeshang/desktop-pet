@@ -48,10 +48,7 @@ if %errorLevel% neq 0 (
 python -c "import cv2" 2>nul
 if %errorLevel% neq 0 (
     echo [INFO] Installing opencv-python (v4.9.0 for Python 3.9 compat)...
-    pip install opencv-python==4.9.0.80 -i https://pypi.tuna.tsinghua.edu.cn/simple
-    if %errorLevel% neq 0 (
-        pip install opencv-python==4.9.0.80 -i https://mirrors.aliyun.com/pypi/simple
-    )
+    pip install opencv-python==4.9.0.80 -i https://pypi.tuna.tsinghua.edu.cn/simple || pip install opencv-python==4.9.0.80 -i https://mirrors.aliyun.com/pypi/simple
     echo.
 )
 
@@ -60,38 +57,16 @@ python -c "import mediapipe" 2>nul
 if %errorLevel% neq 0 (
     if exist deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl (
         echo [INFO] Installing MediaPipe from local package...
-        pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl -i https://pypi.tuna.tsinghua.edu.cn/simple
-        if %errorLevel% neq 0 (
-            echo [WARN] Retrying with Aliyun mirror...
-            pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl -i https://mirrors.aliyun.com/pypi/simple
-        )
+        pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl -i https://pypi.tuna.tsinghua.edu.cn/simple || pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl -i https://mirrors.aliyun.com/pypi/simple
         echo.
     ) else (
         echo [INFO] MediaPipe not found, trying pip install...
-        pip install mediapipe -i https://pypi.tuna.tsinghua.edu.cn/simple
+        pip install mediapipe -i https://pypi.tuna.tsinghua.edu.cn/simple || pip install mediapipe -i https://mirrors.aliyun.com/pypi/simple
         echo.
     )
 )
 
 echo [OK] All libraries ready!
-echo.
-echo ========================================
-echo Starting Desktop Pet...
-echo.
-echo Controls:
-echo - Left-click: Random action (wave/jump/walk)
-echo - Double-click: Spin jump!
-echo - Right-click: Feed food (burger/fries/snail noodles)
-echo - Drag: Move pet
-echo - Tray menu: Size/Photo/History/Exit
-echo.
-echo Features:
-echo - Photo to Q-Avatar (chibi style)
-echo - Auto clothes color matching
-echo - Live2D style animation (breath/blink/hair wave)
-echo - Mood-driven expressions (happy/surprised/eating)
-echo - Idle states (stand/crouch/sleep)
-echo ========================================
 echo.
 
 :: Run the program
