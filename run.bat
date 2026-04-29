@@ -49,7 +49,7 @@ python -c "import cv2" 2>nul
 if %errorLevel% neq 0 (
     echo [INFO] Installing opencv-python (v4.9.0 for Python 3.9 compat)...
     pip install opencv-python==4.9.0.80 -i https://pypi.tuna.tsinghua.edu.cn/simple
-    if !errorlevel! neq 0 (
+    if %errorLevel% neq 0 (
         pip install opencv-python==4.9.0.80 -i https://mirrors.aliyun.com/pypi/simple
     )
     echo.
@@ -61,8 +61,8 @@ if %errorLevel% neq 0 (
     if exist deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl (
         echo [INFO] Installing MediaPipe from local package...
         pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl -i https://pypi.tuna.tsinghua.edu.cn/simple
-        if !errorlevel! neq 0 (
-            echo [WARN] Tsinghua mirror failed, trying Aliyun...
+        if %errorLevel% neq 0 (
+            echo [WARN] Retrying with Aliyun mirror...
             pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl -i https://mirrors.aliyun.com/pypi/simple
         )
         echo.
