@@ -40,11 +40,36 @@ except ImportError:
         local_whl = os.path.join(os.path.dirname(_script_dir), "deps", "mediapipe-0.10.21-cp39-cp39-win_amd64.whl")
         if os.path.exists(local_whl):
             print("[INFO] Found local package, installing...")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", local_whl, "--quiet"])
+            # Use mirror for dependency resolution (Chinese network friendly)
+            mirrors = ["https://pypi.tuna.tsinghua.edu.cn/simple", "https://mirrors.aliyun.com/pypi/simple"]
+            installed = False
+            for mirror in mirrors:
+                try:
+                    subprocess.check_call(
+                        [sys.executable, "-m", "pip", "install", local_whl, "-i", mirror, "--quiet"]
+                    )
+                    installed = True
+                    break
+                except:
+                    continue
+            if not installed:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", local_whl, "--quiet"])
         else:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "mediapipe", "--quiet"]
-            )
+            mirrors = ["https://pypi.tuna.tsinghua.edu.cn/simple", "https://mirrors.aliyun.com/pypi/simple"]
+            installed = False
+            for mirror in mirrors:
+                try:
+                    subprocess.check_call(
+                        [sys.executable, "-m", "pip", "install", "mediapipe", "-i", mirror, "--quiet"]
+                    )
+                    installed = True
+                    break
+                except:
+                    continue
+            if not installed:
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "mediapipe", "--quiet"]
+                )
         print("[OK] MediaPipe installed! Restarting import...")
         from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions, RunningMode
         from mediapipe.tasks.python import BaseOptions

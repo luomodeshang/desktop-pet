@@ -57,11 +57,15 @@ python -c "import mediapipe" 2>nul
 if %errorLevel% neq 0 (
     if exist deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl (
         echo [INFO] Installing MediaPipe from local package...
-        pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl
+        pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl -i https://pypi.tuna.tsinghua.edu.cn/simple
+        if !errorlevel! neq 0 (
+            echo [WARN] Tsinghua mirror failed, trying Aliyun...
+            pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl -i https://mirrors.aliyun.com/pypi/simple
+        )
         echo.
     ) else (
         echo [INFO] MediaPipe not found, trying pip install...
-        pip install mediapipe
+        pip install mediapipe -i https://pypi.tuna.tsinghua.edu.cn/simple
         echo.
     )
 )
