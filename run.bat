@@ -34,7 +34,7 @@ python -c "import cv2; import mediapipe" >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Fixing OpenCV/MediaPipe compatibility...
     pip uninstall opencv-contrib-python opencv-python opencv-python-headless -y >nul 2>&1
-    pip install opencv-python==4.9.0.80
+    pip install --user opencv-python==4.9.0.80
 )
 
 :: Install MediaPipe if missing
@@ -57,13 +57,13 @@ goto end
 :install_mp
 if exist "deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl" goto install_local
 echo [INFO] Installing MediaPipe from PyPI...
-pip install mediapipe
+pip install --user mediapipe
 echo.
 goto run_pet
 
 :install_local
 echo [INFO] Installing MediaPipe from local package...
-pip install "deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl"
+pip install --user "deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl"
 echo.
 goto run_pet
 

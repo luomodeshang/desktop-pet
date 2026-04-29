@@ -38,7 +38,7 @@ if cv2 is not None:
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "opencv-python==4.9.0.80", "--quiet"],
+                [sys.executable, "-m", "pip", "install", "--user", "opencv-python==4.9.0.80", "--quiet"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             importlib.invalidate_caches()
@@ -70,21 +70,21 @@ except ImportError:
             for mirror in mirrors:
                 try:
                     subprocess.check_call(
-                        [sys.executable, "-m", "pip", "install", local_whl, "-i", mirror, "--quiet"]
+                        [sys.executable, "-m", "pip", "install", "--user", local_whl, "-i", mirror, "--quiet"]
                     )
                     installed = True
                     break
                 except:
                     continue
             if not installed:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", local_whl, "--quiet"])
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", local_whl, "--quiet"])
         else:
             mirrors = ["https://pypi.tuna.tsinghua.edu.cn/simple", "https://mirrors.aliyun.com/pypi/simple"]
             installed = False
             for mirror in mirrors:
                 try:
                     subprocess.check_call(
-                        [sys.executable, "-m", "pip", "install", "mediapipe", "-i", mirror, "--quiet"]
+                        [sys.executable, "-m", "pip", "install", "--user", "mediapipe", "-i", mirror, "--quiet"]
                     )
                     installed = True
                     break
