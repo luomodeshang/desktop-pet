@@ -47,8 +47,11 @@ if %errorLevel% neq 0 (
 
 python -c "import cv2" 2>nul
 if %errorLevel% neq 0 (
-    echo [INFO] Installing opencv-python...
-    pip install opencv-python
+    echo [INFO] Installing opencv-python (v4.9.0 for Python 3.9 compat)...
+    pip install opencv-python==4.9.0.80 -i https://pypi.tuna.tsinghua.edu.cn/simple
+    if !errorlevel! neq 0 (
+        pip install opencv-python==4.9.0.80 -i https://mirrors.aliyun.com/pypi/simple
+    )
     echo.
 )
 
