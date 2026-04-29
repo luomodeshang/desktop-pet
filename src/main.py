@@ -31,7 +31,7 @@ class DesktopPet(QWidget):
     def __init__(self, photo_path=None):
         super().__init__()
         self.photo_path = photo_path
-        self.pet_size_index = 3
+        self.pet_size_index = 1
         self.size_options = [100, 150, 200, 250, 300]
         self.pet_w = self.size_options[self.pet_size_index]
         self.pet_h = self.size_options[self.pet_size_index]
@@ -82,7 +82,7 @@ class DesktopPet(QWidget):
     def _create_from_photo(self, path):
         print(f"[INFO] Processing photo: {path}")
         f = extract_face_features(path)
-        if f.has_face: print(f"[OK] Face detected! Shape: {f.face_shape}")
+        if f.has_face: print("[OK] Face detected!")
         else: print("[WARN] No face detected")
         self.renderer = QAvatarRenderer(f)
         self.animator = Live2DAnimator(self.renderer, canvas_size=(self.pet_w, self.pet_h))
@@ -98,7 +98,7 @@ class DesktopPet(QWidget):
         f.has_face = False; f.skin_color = (200,170,150); f.hair_color = (50,40,30)
         f.eye_color = (30,30,30); f.lip_color = (80,80,160)
         f.clothes_color = (80,100,180); f.clothes_secondary = (180,180,200)
-        f.face_shape = "round"
+
         self.renderer = QAvatarRenderer(f)
         self.animator = Live2DAnimator(self.renderer, canvas_size=(self.pet_w, self.pet_h))
         pix = self.renderer.render((self.pet_w, self.pet_h))
@@ -252,7 +252,7 @@ class DesktopPet(QWidget):
                 if self.animator: self.animator.params.eye_open=1.0; self.animator.params.happiness=0.5
 
     def load_config(self):
-        d={"pet_size_index":3,"position":[100,100],"last_state":"standing","food_history":[],"user_photo":None,"use_default_avatar":True}
+        d={"pet_size_index":1,"position":[100,100],"last_state":"standing","food_history":[],"user_photo":None,"use_default_avatar":True}
         if os.path.exists(CONFIG_PATH):
             try:
                 with open(CONFIG_PATH,"r",encoding="utf-8") as f:

@@ -483,7 +483,7 @@ class QAvatarRenderer:
             return ft.landmarks.get(name, None)
         
         # ============ 1. DRAW BODY ============
-        body_top = map_y(0.47) if ft.mediapipe_detected else int(ch * 0.80)
+        body_top = map_y(0.47) if ft.mediapipe_detected else int(ch * 0.65)
         self._draw_body(painter, cw, body_top, ch - body_top, ft, breath)
         
         # ============ 2. DRAW HEAD ============
@@ -848,7 +848,11 @@ class QAvatarRenderer:
             painter.drawPath(path)
         else:
             # Fallback hair
-            pass
+            fx = mx(0.45); fy = my(0.20)
+            r = mx(0.75); hair_r = (r - fx) * 1.3
+            painter.setBrush(QBrush(hair_dark_c))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(fx - hair_r, fy - int(hair_r * 0.4), int(hair_r * 2), int(hair_r * 0.8))
     
     # ---- Hair front layer ----
     def _draw_hair_front(self, painter, mx, my, ft, lm, params, hw):
