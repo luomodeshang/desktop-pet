@@ -33,10 +33,18 @@ except ImportError:
     # 自动安装 MediaPipe（无编程基础用户友好）
     print("[INFO] MediaPipe not found. Auto-installing... (one-time)")
     try:
-        import subprocess, sys
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "mediapipe", "--quiet"]
-        )
+        import subprocess, sys, os
+        
+        # Try local whl first (for users without internet access)
+        _script_dir = os.path.dirname(os.path.abspath(__file__))
+        local_whl = os.path.join(os.path.dirname(_script_dir), "deps", "mediapipe-0.10.21-cp39-cp39-win_amd64.whl")
+        if os.path.exists(local_whl):
+            print("[INFO] Found local package, installing...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", local_whl, "--quiet"])
+        else:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "mediapipe", "--quiet"]
+            )
         print("[OK] MediaPipe installed! Restarting import...")
         from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions, RunningMode
         from mediapipe.tasks.python import BaseOptions
@@ -45,7 +53,7 @@ except ImportError:
     except Exception as auto_e:
         print(f"[INFO] Auto-install failed: {auto_e}")
         print("[INFO] Using OpenCV fallback (limited features)")
-        print("[INFO] To install manually: pip install mediapipe")
+        print("[INFO] If network is restricted, download whl manually and place in deps/ folder")
         _HAS_MEDIAPIPE = False
 
 # ====== Live2D动画参数 ======

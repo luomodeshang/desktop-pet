@@ -52,6 +52,20 @@ if %errorLevel% neq 0 (
     echo.
 )
 
+:: Install mediapipe from local whl if available (avoid network issues in China)
+python -c "import mediapipe" 2>nul
+if %errorLevel% neq 0 (
+    if exist deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl (
+        echo [INFO] Installing MediaPipe from local package...
+        pip install deps\mediapipe-0.10.21-cp39-cp39-win_amd64.whl
+        echo.
+    ) else (
+        echo [INFO] MediaPipe not found, trying pip install...
+        pip install mediapipe
+        echo.
+    )
+)
+
 echo [OK] All libraries ready!
 echo.
 echo ========================================
