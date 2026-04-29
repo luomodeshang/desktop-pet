@@ -30,7 +30,23 @@ try:
     from mediapipe import Image, ImageFormat
     _HAS_MEDIAPIPE = True
 except ImportError:
-    _HAS_MEDIAPIPE = False
+    # 自动安装 MediaPipe（无编程基础用户友好）
+    print("[INFO] MediaPipe not found. Auto-installing... (one-time)")
+    try:
+        import subprocess, sys
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "mediapipe", "--quiet"]
+        )
+        print("[OK] MediaPipe installed! Restarting import...")
+        from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions, RunningMode
+        from mediapipe.tasks.python import BaseOptions
+        from mediapipe import Image, ImageFormat
+        _HAS_MEDIAPIPE = True
+    except Exception as auto_e:
+        print(f"[INFO] Auto-install failed: {auto_e}")
+        print("[INFO] Using OpenCV fallback (limited features)")
+        print("[INFO] To install manually: pip install mediapipe")
+        _HAS_MEDIAPIPE = False
 
 # ====== Live2D动画参数 ======
 class Live2DParams:
